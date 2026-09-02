@@ -2,42 +2,55 @@ package com.keonys.copilot3DX.dto;
 
 public class ChangeActionDto {
 
-    private String name;
-    private String title;
-    private String state;
+    private boolean success;
+    private int statusCode;
+    private String searchCriteria;
+    private String response;
 
     public ChangeActionDto() {
     }
 
-    public ChangeActionDto(String name,
-                           String title,
-                           String state) {
-        this.name = name;
-        this.title = title;
-        this.state = state;
+    public ChangeActionDto(
+            boolean success,
+            int statusCode,
+            String searchCriteria,
+            String response) {
+
+        this.success = success;
+        this.statusCode = statusCode;
+        this.searchCriteria = searchCriteria;
+        this.response = response;
     }
 
-    public String getName() {
-        return name;
+    public boolean isSuccess() {
+        return success;
     }
 
-    public void setName(String name) {
-        this.name = name;
+    public void setSuccess(boolean success) {
+        this.success = success;
     }
 
-    public String getTitle() {
-        return title;
+    public int getStatusCode() {
+        return statusCode;
     }
 
-    public void setTitle(String title) {
-        this.title = title;
+    public void setStatusCode(int statusCode) {
+        this.statusCode = statusCode;
     }
 
-    public String getState() {
-        return state;
+    public String getSearchCriteria() {
+        return searchCriteria;
     }
 
-    public void setState(String state) {
-        this.state = state;
+    public void setSearchCriteria(String searchCriteria) {
+        this.searchCriteria = searchCriteria;
+    }
+
+    public String getResponse() {
+        return response;
+    }
+
+    public void setResponse(String response) {
+        this.response = response;
     }
 }

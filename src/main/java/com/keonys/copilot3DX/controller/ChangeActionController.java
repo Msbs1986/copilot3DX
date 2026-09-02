@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.keonys.copilot3DX.config.HttpRequestService;
+import com.keonys.copilot3DX.dto.ChangeActionDto;
 import com.keonys.copilot3DX.service.Service3DXConnexion;
 
 @RestController
@@ -36,60 +37,67 @@ public class ChangeActionController {
 		this.httpRequestService = httpRequestService;
 	}
 
-	/**
-	 * Exemples :
-	 *
-	 * http://localhost:9090/change-actions/search
-	 *
-	 * ou
-	 *
-	 * http://localhost:9090/change-actions/search?searchStr=current="Complete"
-	 */
-	@GetMapping(value = "/search", produces = MediaType.TEXT_PLAIN_VALUE)
-	public String searchChangeActions(@RequestParam(required = false) String searchStr) throws Exception {
+	@GetMapping(
+	        value = "/search",
+	        produces = MediaType.APPLICATION_JSON_VALUE
+	)
+	public ChangeActionDto searchChangeActions(
+	        @RequestParam(required = false) String searchStr) throws Exception {
 
-		// Authentification 3DEXPERIENCE
-		service3DXConnexion.prepareAuthorizationHeaderValue();
+	    service3DXConnexion.prepareAuthorizationHeaderValue();
 
-		// Création des headers d'authentification
-		Map<String, String> headers = service3DXConnexion.createAuthenticatedHeaders();
+	    Map<String, String> headers =
+	            service3DXConnexion.createAuthenticatedHeaders();
+	    
+	    String csrfToken = service3DXConnexion.getCsrfTokenValue();
 
-		String csrfToken = service3DXConnexion.getCsrfTokenValue();
+	    headers.put("SecurityContext", secContext);
+	    headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
 
-		headers.put("SecurityContext", secContext);
-		headers.put("Accept", "application/json");
+	    if (searchStr == null || searchStr.isBlank()) {
+	        searchStr = "*";
+	    }
 
-		// Critère par défaut
-		if (searchStr == null || searchStr.isBlank()) {
+	    String encodedSearchStr =
+	            URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
 
-			searchStr = "*";
-		}
+	    String url = space3dsUrlStr
+	            + CHANGE_ACTION_ENDPOINT
+	            + "?$searchStr="
+	            + encodedSearchStr;
 
-		String encodedSearchStr = URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
+	    System.out.println("==========================================");
+	    System.out.println("3DX Security Context : " + secContext);
+	    System.out.println("3DX CHANGE ACTION SEARCH");
+	    System.out.println("Search String : " + searchStr);
+	    System.out.println("URL           : " + url);
+	    System.out.println("==========================================");
 
-		String url = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + "?$searchStr=" + encodedSearchStr;
+	    HttpResponse<String> response =
+	            httpRequestService.loadUrl(
+	                    "GET",
+	                    "",
+	                    "",
+	                    url,
+	                    headers
+	            );
 
-		// String url = space3dsUrlStr + CHANGE_ACTION_ENDPOINT ;
+	    System.out.println("Status Code : " + response.statusCode());
 
-		System.out.println("==========================================");
-		System.out.println("3DX Security Context " + secContext);
-		System.out.println("3DX CHANGE ACTION SEARCH");
-		System.out.println("Search String : " + searchStr);
-		System.out.println("URL           : " + url);
-		System.out.println("==========================================");
+	    if (response.statusCode() != 200) {
+	        throw new RuntimeException(
+	                "3DEXPERIENCE Search failed. Status="
+	                        + response.statusCode()
+	                        + " Response="
+	                        + response.body()
+	        );
+	    }
 
-		// url
-		// ="https://r1132101389013-eu1-space.3dexperience.3ds.com/enovia/resources/v1/modeler/dslc/changeaction/7B44EFF40E9716006A8EE28A00006059?$fields=realizedChanges";
-		HttpResponse<String> response = httpRequestService.loadUrl("GET", "", "", url, headers);
-
-		System.out.println("Status Code : " + response.statusCode());
-
-		if (response.statusCode() != 200) {
-
-			throw new RuntimeException(
-					"3DEXPERIENCE Search failed. Status=" + response.statusCode() + " Response=" + response.body());
-		}
-
-		return response.body();
+	    return new ChangeActionDto(
+	            true,
+	            response.statusCode(),
+	            searchStr,
+	            response.body()
+	    );
 	}
 }

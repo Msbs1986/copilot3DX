@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -44,7 +45,7 @@ public class ChangeActionController {
 	 *
 	 * http://localhost:9090/change-actions/search?searchStr=current="Complete"
 	 */
-	@GetMapping("/search")
+	@GetMapping(value = "/search", produces = MediaType.TEXT_PLAIN_VALUE)
 	public String searchChangeActions(@RequestParam(required = false) String searchStr) throws Exception {
 
 		// Authentification 3DEXPERIENCE
@@ -53,7 +54,7 @@ public class ChangeActionController {
 		// Création des headers d'authentification
 		Map<String, String> headers = service3DXConnexion.createAuthenticatedHeaders();
 
-		 String csrfToken = service3DXConnexion.getCsrfTokenValue();
+		String csrfToken = service3DXConnexion.getCsrfTokenValue();
 
 		headers.put("SecurityContext", secContext);
 		headers.put("Accept", "application/json");
@@ -67,8 +68,8 @@ public class ChangeActionController {
 		String encodedSearchStr = URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
 
 		String url = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + "?$searchStr=" + encodedSearchStr;
-		
-		//String url = space3dsUrlStr + CHANGE_ACTION_ENDPOINT ;
+
+		// String url = space3dsUrlStr + CHANGE_ACTION_ENDPOINT ;
 
 		System.out.println("==========================================");
 		System.out.println("3DX Security Context " + secContext);
@@ -77,7 +78,8 @@ public class ChangeActionController {
 		System.out.println("URL           : " + url);
 		System.out.println("==========================================");
 
-		//url ="https://r1132101389013-eu1-space.3dexperience.3ds.com/enovia/resources/v1/modeler/dslc/changeaction/7B44EFF40E9716006A8EE28A00006059?$fields=realizedChanges";
+		// url
+		// ="https://r1132101389013-eu1-space.3dexperience.3ds.com/enovia/resources/v1/modeler/dslc/changeaction/7B44EFF40E9716006A8EE28A00006059?$fields=realizedChanges";
 		HttpResponse<String> response = httpRequestService.loadUrl("GET", "", "", url, headers);
 
 		System.out.println("Status Code : " + response.statusCode());

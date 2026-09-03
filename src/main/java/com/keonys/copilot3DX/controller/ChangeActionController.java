@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.keonys.copilot3DX.config.HttpRequestService;
 import com.keonys.copilot3DX.dto.ChangeActionDto;
-import com.keonys.copilot3DX.dto.ChangeActionInfo;
+import com.keonys.copilot3DX.model.ChangeActionInfo;
 import com.keonys.copilot3DX.service.Service3DXConnexion;
 
 @RestController

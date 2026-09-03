@@ -2,6 +2,8 @@ package com.keonys.copilot3DX.dto;
 
 import java.util.List;
 
+import com.keonys.copilot3DX.model.ChangeActionInfo;
+
 public class ChangeActionDto {
 
 	private boolean success;

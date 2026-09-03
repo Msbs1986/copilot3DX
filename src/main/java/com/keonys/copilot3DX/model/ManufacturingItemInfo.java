@@ -1,20 +1,22 @@
-package com.keonys.copilot3DX.dto;
+package com.keonys.copilot3DX.model;
 
-public class ChangeActionInfo {
+public class ManufacturingItemInfo {
 
     private String id;
+    private String physicalId;
     private String name;
     private String title;
+    private String revision;
+    private String type;
     private String state;
     private String owner;
-    private String originator;
-    private String severity;
+    private String organization;
     private String collabSpace;
     private String description;
     private String creationDate;
     private String modificationDate;
 
-    public ChangeActionInfo() {
+    public ManufacturingItemInfo() {
     }
 
     public String getId() {
@@ -23,6 +25,14 @@ public class ChangeActionInfo {
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    public String getPhysicalId() {
+        return physicalId;
+    }
+
+    public void setPhysicalId(String physicalId) {
+        this.physicalId = physicalId;
     }
 
     public String getName() {
@@ -41,6 +51,22 @@ public class ChangeActionInfo {
         this.title = title;
     }
 
+    public String getRevision() {
+        return revision;
+    }
+
+    public void setRevision(String revision) {
+        this.revision = revision;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
     public String getState() {
         return state;
     }
@@ -57,20 +83,12 @@ public class ChangeActionInfo {
         this.owner = owner;
     }
 
-    public String getOriginator() {
-        return originator;
+    public String getOrganization() {
+        return organization;
     }
 
-    public void setOriginator(String originator) {
-        this.originator = originator;
-    }
-
-    public String getSeverity() {
-        return severity;
-    }
-
-    public void setSeverity(String severity) {
-        this.severity = severity;
+    public void setOrganization(String organization) {
+        this.organization = organization;
     }
 
     public String getCollabSpace() {
@@ -101,7 +119,8 @@ public class ChangeActionInfo {
         return modificationDate;
     }
 
-    public void setModificationDate(String modificationDate) {
+    public void setModificationDate(
+            String modificationDate) {
         this.modificationDate = modificationDate;
     }
 }

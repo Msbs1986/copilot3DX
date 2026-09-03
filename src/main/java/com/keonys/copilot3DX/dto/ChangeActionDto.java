@@ -1,13 +1,15 @@
 package com.keonys.copilot3DX.dto;
 
+import java.util.List;
+
 public class ChangeActionDto {
 
 	private boolean success;
 	private int statusCode;
 	private String searchCriteria;
-	private Object response;
-
-	public ChangeActionDto(boolean success, int statusCode, String searchCriteria, Object response) {
+	private List<ChangeActionInfo> response;
+	
+	public ChangeActionDto(boolean success, int statusCode, String searchCriteria, List<ChangeActionInfo> response) {
 
 		this.success = success;
 		this.statusCode = statusCode;
@@ -41,11 +43,11 @@ public class ChangeActionDto {
 		this.searchCriteria = searchCriteria;
 	}
 
-	public Object getResponse() {
+	public List<ChangeActionInfo> getResponse() {
 		return response;
 	}
 
-	public void setResponse(Object response) {
+	public void setResponse(List<ChangeActionInfo> response) {
 		this.response = response;
 	}
 }

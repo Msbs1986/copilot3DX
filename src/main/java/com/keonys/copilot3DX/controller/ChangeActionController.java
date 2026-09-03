@@ -49,7 +49,7 @@ public class ChangeActionController {
 		service3DXConnexion.prepareAuthorizationHeaderValue();
 
 		Map<String, String> headers = service3DXConnexion.createAuthenticatedHeaders();
-		
+
 		String csrf = service3DXConnexion.getCsrfTokenValue();
 
 		headers.put("SecurityContext", secContext);

@@ -3,8 +3,13 @@ package com.keonys.copilot3DX.controller;
 import java.net.URLEncoder;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.keonys.copilot3DX.config.HttpRequestService;
 import com.keonys.copilot3DX.dto.ChangeActionDto;
+import com.keonys.copilot3DX.dto.ChangeActionInfo;
 import com.keonys.copilot3DX.service.Service3DXConnexion;
 
 @RestController
@@ -37,67 +43,121 @@ public class ChangeActionController {
 		this.httpRequestService = httpRequestService;
 	}
 
-	@GetMapping(
-	        value = "/search",
-	        produces = MediaType.APPLICATION_JSON_VALUE
-	)
-	public ChangeActionDto searchChangeActions(
-	        @RequestParam(required = false) String searchStr) throws Exception {
+	@GetMapping(value = "/search", produces = MediaType.APPLICATION_JSON_VALUE)
+	public ChangeActionDto searchChangeActions(@RequestParam(required = false) String searchStr) throws Exception {
 
-	    service3DXConnexion.prepareAuthorizationHeaderValue();
+		service3DXConnexion.prepareAuthorizationHeaderValue();
 
-	    Map<String, String> headers =
-	            service3DXConnexion.createAuthenticatedHeaders();
-	    
-	    String csrfToken = service3DXConnexion.getCsrfTokenValue();
+		Map<String, String> headers = service3DXConnexion.createAuthenticatedHeaders();
+		
+		String csrf = service3DXConnexion.getCsrfTokenValue();
 
-	    headers.put("SecurityContext", secContext);
-	    headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
+		headers.put("SecurityContext", secContext);
+		headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
 
-	    if (searchStr == null || searchStr.isBlank()) {
-	        searchStr = "*";
-	    }
+		if (searchStr == null || searchStr.isBlank()) {
+			searchStr = "*";
+		}
 
-	    String encodedSearchStr =
-	            URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
+		String encodedSearchStr = URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
 
-	    String url = space3dsUrlStr
-	            + CHANGE_ACTION_ENDPOINT
-	            + "?$searchStr="
-	            + encodedSearchStr;
+		String searchUrl = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + "?$searchStr=" + encodedSearchStr;
 
-	    System.out.println("==========================================");
-	    System.out.println("3DX Security Context : " + secContext);
-	    System.out.println("3DX CHANGE ACTION SEARCH");
-	    System.out.println("Search String : " + searchStr);
-	    System.out.println("URL           : " + url);
-	    System.out.println("==========================================");
+		System.out.println("==========================================");
+		System.out.println("3DX CHANGE ACTION SEARCH");
+		System.out.println("Search String : " + searchStr);
+		System.out.println("URL           : " + searchUrl);
+		System.out.println("==========================================");
 
-	    HttpResponse<String> response =
-	            httpRequestService.loadUrl(
-	                    "GET",
-	                    "",
-	                    "",
-	                    url,
-	                    headers
-	            );
+		HttpResponse<String> searchResponse = httpRequestService.loadUrl("GET", "", "", searchUrl, headers);
 
-	    System.out.println("Status Code : " + response.statusCode());
+		System.out.println("Search Status : " + searchResponse.statusCode());
 
-	    if (response.statusCode() != 200) {
-	        throw new RuntimeException(
-	                "3DEXPERIENCE Search failed. Status="
-	                        + response.statusCode()
-	                        + " Response="
-	                        + response.body()
-	        );
-	    }
+		if (searchResponse.statusCode() != 200) {
 
-	    return new ChangeActionDto(
-	            true,
-	            response.statusCode(),
-	            searchStr,
-	            response.body()
-	    );
+			throw new RuntimeException("3DEXPERIENCE Search failed. Status=" + searchResponse.statusCode()
+					+ " Response=" + searchResponse.body());
+		}
+
+		JSONParser parser = new JSONParser();
+
+		JSONObject searchJson = (JSONObject) parser.parse(searchResponse.body());
+
+		JSONArray changeActions = (JSONArray) searchJson.get("changeAction");
+
+		List<ChangeActionInfo> result = new ArrayList<>();
+
+		if (changeActions != null) {
+
+			for (Object obj : changeActions) {
+
+				JSONObject ca = (JSONObject) obj;
+
+				String relativePath = (String) ca.get("relativePath");
+
+				if (relativePath == null || relativePath.isBlank()) {
+					continue;
+				}
+
+				String detailUrl = space3dsUrlStr + relativePath;
+
+				System.out.println("------------------------------------------");
+				System.out.println("Detail URL : " + detailUrl);
+
+				try {
+
+					HttpResponse<String> detailResponse = httpRequestService.loadUrl("GET", "", "", detailUrl, headers);
+
+					if (detailResponse.statusCode() != 200) {
+
+						System.out.println("Failed : " + detailResponse.statusCode());
+
+						continue;
+					}
+
+					JSONObject detailJson = (JSONObject) parser.parse(detailResponse.body());
+
+					ChangeActionInfo info = new ChangeActionInfo();
+
+					info.setId(getString(detailJson, "id"));
+
+					info.setName(getString(detailJson, "name"));
+
+					info.setTitle(getString(detailJson, "title"));
+
+					info.setState(getString(detailJson, "state"));
+
+					info.setOwner(getString(detailJson, "owner"));
+
+					info.setOriginator(getString(detailJson, "originator"));
+
+					info.setSeverity(getString(detailJson, "severity"));
+
+					info.setCollabSpace(getString(detailJson, "collabSpace"));
+
+					info.setDescription(getString(detailJson, "description"));
+
+					info.setCreationDate(getString(detailJson, "Creation Date"));
+
+					info.setModificationDate(getString(detailJson, "Last Modification Date"));
+
+					result.add(info);
+
+				} catch (Exception ex) {
+
+					System.err.println("Error while processing " + relativePath + " : " + ex.getMessage());
+
+				}
+			}
+		}
+
+		return new ChangeActionDto(true, 200, searchStr, result);
+	}
+
+	private String getString(JSONObject json, String key) {
+
+		Object value = json.get(key);
+
+		return value == null ? "" : value.toString();
 	}
 }

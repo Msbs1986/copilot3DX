@@ -85,7 +85,7 @@ public class ManufacturingItemController {
 
 		String encodedSearchStr = URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
 
-		String searchUrl = space3dsUrlStr + MANUFACTURING_ITEM_SEARCH_ENDPOINT + "?$searchStr=" + encodedSearchStr+"&$top=100";
+		String searchUrl = space3dsUrlStr + MANUFACTURING_ITEM_SEARCH_ENDPOINT + "?$searchStr=" + encodedSearchStr+"&$top=50";
 
 		System.out.println("==========================================");
 		System.out.println("3DX MANUFACTURING ITEM SEARCH");
@@ -134,9 +134,9 @@ public class ManufacturingItemController {
 
 				String physicalId = getFirstString(manufacturingItemSearchResult, "physicalId", "physicalid", "id");
 
-				System.out.println("------------------------------------------");
-				System.out.println("Manufacturing Item Physical ID : " + physicalId);
-				System.out.println("Relative Path                  : " + relativePath);
+//				System.out.println("------------------------------------------");
+//				System.out.println("Manufacturing Item Physical ID : " + physicalId);
+//				System.out.println("Relative Path                  : " + relativePath);
 
 				/*
 				 * Si relativePath est présent, on utilise directement le chemin fourni par
@@ -153,13 +153,13 @@ public class ManufacturingItemController {
 					continue;
 				}
 
-				System.out.println("Detail URL                     : " + detailUrl);
+				//System.out.println("Detail URL                     : " + detailUrl);
 
 				try {
 
 					HttpResponse<String> detailResponse = httpRequestService.loadUrl("GET", "", "", detailUrl, headers);
 
-					System.out.println("Detail Status                 : " + detailResponse.statusCode());
+					//System.out.println("Detail Status                 : " + detailResponse.statusCode());
 
 					if (detailResponse.statusCode() != 200) {
 

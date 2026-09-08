@@ -57,7 +57,7 @@ public class ChangeActionController {
 
 		String encodedSearchStr = URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
 
-		String searchUrl = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + "?$searchStr=" + encodedSearchStr+"&$top=100";
+		String searchUrl = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + "?$searchStr=" + encodedSearchStr+"&$top=50";
 
 		System.out.println("==========================================");
 		System.out.println("3DX CHANGE ACTION SEARCH");
@@ -97,8 +97,8 @@ public class ChangeActionController {
 
 				String detailUrl = space3dsUrlStr + relativePath;
 
-				System.out.println("------------------------------------------");
-				System.out.println("Detail URL : " + detailUrl);
+				//System.out.println("------------------------------------------");
+				//System.out.println("Detail URL : " + detailUrl);
 
 				try {
 

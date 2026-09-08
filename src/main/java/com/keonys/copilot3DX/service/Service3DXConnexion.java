@@ -1,6 +1,8 @@
 package com.keonys.copilot3DX.service;
 
+import java.io.UnsupportedEncodingException;
 import java.net.http.HttpResponse;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -23,6 +25,8 @@ import jakarta.annotation.PostConstruct;
 public class Service3DXConnexion {
 
     private static final Logger logger = LoggerFactory.getLogger(Service3DXConnexion.class);
+    
+    public static String _basicauthentication = "";
     
     // Configuration injected from properties
     @Value("${threedx.tenantid}")
@@ -78,13 +82,24 @@ public class Service3DXConnexion {
         loginTicket = getLoginTicketPassport();
         
         // Step 2: Authenticate
-        authenticate();
-        
-      
+        //authenticate();
+        basicAuthentication();
         
 
     }
 
+    
+	public String basicAuthentication() throws UnsupportedEncodingException {
+		// Basic authentication for openness agent
+		String loginandpassword = login3DX + ":" + password3DX;
+		String base64encodedString = Base64.getEncoder().encodeToString(loginandpassword.getBytes("utf-8"));
+
+		_basicauthentication = "Basic " + base64encodedString;
+
+		System.out.println("_basicauthentication: " + _basicauthentication);
+		return _basicauthentication;
+	}
+    
     /**
      * Logout from passport
      * @throws Exception if logout fails
@@ -175,6 +190,36 @@ public class Service3DXConnexion {
         
         return token;
     }
+    
+    public String getCsrfTokenValueBasic() throws Exception {
+		String csrfTokenUrl = space3dsUrlStr + "/resources/v1/application/CSRF" + "?tenant=" + tenant;
+
+		HashMap<String, String> headers =  new HashMap<String, String>()
+		{
+			{
+				put("Authorization",_basicauthentication);
+			}
+		};
+		
+		HttpResponse<String> response = httpRequestService.loadUrl("GET", "", "", csrfTokenUrl, headers);
+		logger.debug("CSRF token response: {}", response.body());
+
+		// Parse JSON response
+		JSONParser parser = new JSONParser();
+		JSONObject jsonObj = (JSONObject) parser.parse(response.body());
+
+		String token = "";
+		if (jsonObj.get("success").toString().equalsIgnoreCase("true")) {
+			JSONObject csrf = (JSONObject) jsonObj.get("csrf");
+			token = csrf.get("value").toString();
+			logger.info("CSRF token obtained");
+		} else {
+			logger.error("Failed to get CSRF token");
+			throw new Exception("Failed to get CSRF token");
+		}
+
+		return token;
+	}
     
     /**
      * Create an authenticated request with CSRF token

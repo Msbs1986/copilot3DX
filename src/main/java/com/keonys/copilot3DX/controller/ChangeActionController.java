@@ -4,6 +4,7 @@ import java.net.URLEncoder;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -47,13 +48,8 @@ public class ChangeActionController {
 	public ChangeActionDto searchChangeActions(@RequestParam(required = false) String searchStr) throws Exception {
 
 		service3DXConnexion.prepareAuthorizationHeaderValue();
-
-		Map<String, String> headers = service3DXConnexion.createAuthenticatedHeaders();
-
-		String csrf = service3DXConnexion.getCsrfTokenValue();
-
-		headers.put("SecurityContext", secContext);
-		headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
+		String csrfToken = service3DXConnexion.getCsrfTokenValueBasic();
+		Map<String, String> headers = createSecurityHeaders();
 
 		if (searchStr == null || searchStr.isBlank()) {
 			searchStr = "*";
@@ -61,7 +57,7 @@ public class ChangeActionController {
 
 		String encodedSearchStr = URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
 
-		String searchUrl = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + "?$searchStr=" + encodedSearchStr;
+		String searchUrl = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + "?$searchStr=" + encodedSearchStr+"&$top=100";
 
 		System.out.println("==========================================");
 		System.out.println("3DX CHANGE ACTION SEARCH");
@@ -159,5 +155,12 @@ public class ChangeActionController {
 		Object value = json.get(key);
 
 		return value == null ? "" : value.toString();
+	}
+	
+	private Map<String, String> createSecurityHeaders() {
+		Map<String, String> headers = new HashMap<>();
+		headers.put("SecurityContext", secContext);
+		headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
+		return headers;
 	}
 }

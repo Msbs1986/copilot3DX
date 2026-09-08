@@ -4,6 +4,7 @@ import java.net.URLEncoder;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -63,14 +64,17 @@ public class ManufacturingItemController {
 		/*
 		 * 1. Préparation de l'authentification 3DEXPERIENCE
 		 */
-		service3DXConnexion.prepareAuthorizationHeaderValue();
 
-		Map<String, String> headers = service3DXConnexion.createAuthenticatedHeaders();
+//		service3DXConnexion.prepareAuthorizationHeaderValue();
+//		Map<String, String> headers = service3DXConnexion.createAuthenticatedHeaders();
+//		String csrf = service3DXConnexion.getCsrfTokenValue();
+//		headers.put("SecurityContext", secContext);
+//		headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
 		
-		String csrf = service3DXConnexion.getCsrfTokenValue();
+		service3DXConnexion.prepareAuthorizationHeaderValue();
+		String csrfToken = service3DXConnexion.getCsrfTokenValueBasic();
+		Map<String, String> headers = createSecurityHeaders();
 
-		headers.put("SecurityContext", secContext);
-		headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
 
 		/*
 		 * 2. Critère de recherche par défaut
@@ -81,7 +85,7 @@ public class ManufacturingItemController {
 
 		String encodedSearchStr = URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
 
-		String searchUrl = space3dsUrlStr + MANUFACTURING_ITEM_SEARCH_ENDPOINT + "?$searchStr=" + encodedSearchStr;
+		String searchUrl = space3dsUrlStr + MANUFACTURING_ITEM_SEARCH_ENDPOINT + "?$searchStr=" + encodedSearchStr+"&$top=100";
 
 		System.out.println("==========================================");
 		System.out.println("3DX MANUFACTURING ITEM SEARCH");
@@ -429,5 +433,12 @@ public class ManufacturingItemController {
 		Object value = json.get(key);
 
 		return value == null ? "" : value.toString();
+	}
+
+	private Map<String, String> createSecurityHeaders() {
+		Map<String, String> headers = new HashMap<>();
+		headers.put("SecurityContext", secContext);
+		headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
+		return headers;
 	}
 }

@@ -7,8 +7,6 @@ import org.springframework.stereotype.Component;
 import com.keonys.copilot3DX.dto.ChangeActionDto;
 import com.keonys.copilot3DX.service.ChangeActionService;
 
-import jakarta.annotation.PostConstruct;
-
 @Component
 public class ChangeActionMcpTools {
 
@@ -17,13 +15,6 @@ public class ChangeActionMcpTools {
 	public ChangeActionMcpTools(ChangeActionService changeActionService) {
 
 		this.changeActionService = changeActionService;
-	}
-
-	@PostConstruct
-
-	public void init() {
-		System.out.println(
-				"MCP TOOL REGISTERED -> searchChangeActions");
 	}
 
 	@Tool(name = "searchChangeActions", description = """

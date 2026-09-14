@@ -6,24 +6,20 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.keonys.copilot3DX.mcp.ChangeActionMcpTools;
+import com.keonys.copilot3DX.mcp.EngineeringItemMcpTools;
 import com.keonys.copilot3DX.mcp.ManufacturingItemExpandMcpTools;
 import com.keonys.copilot3DX.mcp.ManufacturingItemMcpTools;
 
 @Configuration
 public class McpConfiguration {
 
-    @Bean
-    public ToolCallbackProvider toolCallbackProvider(
-            ChangeActionMcpTools changeActionMcpTools,
-            ManufacturingItemMcpTools manufacturingItemMcpTools,
-            ManufacturingItemExpandMcpTools expandMcpTools) {
+	@Bean
+	public ToolCallbackProvider toolCallbackProvider(ChangeActionMcpTools changeActionMcpTools,
+			ManufacturingItemMcpTools manufacturingItemMcpTools, ManufacturingItemExpandMcpTools expandMcpTools,
+			EngineeringItemMcpTools engineeringItemMcpTools) {
 
-        return MethodToolCallbackProvider.builder()
-                .toolObjects(
-                        changeActionMcpTools,
-                        manufacturingItemMcpTools,
-                        expandMcpTools
-                )
-                .build();
-    }
+		return MethodToolCallbackProvider.builder()
+				.toolObjects(changeActionMcpTools, manufacturingItemMcpTools, expandMcpTools, engineeringItemMcpTools)
+				.build();
+	}
 }

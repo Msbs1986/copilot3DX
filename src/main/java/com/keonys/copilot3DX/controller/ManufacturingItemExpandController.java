@@ -3,8 +3,13 @@ package com.keonys.copilot3DX.controller;
 import java.net.URLEncoder;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -23,6 +28,12 @@ import com.keonys.copilot3DX.service.Service3DXConnexion;
 @RequestMapping("/manufacturing-items")
 public class ManufacturingItemExpandController {
 
+	private static final String SEARCH_ENDPOINT = "/resources/v1/modeler/dsmfg/dsmfg:MfgItem/search";
+
+	private static final String MFG_ITEM_ENDPOINT = "/resources/v1/modeler/dsmfg/dsmfg:MfgItem/";
+
+	private static final String EXPAND_MASK = "dsmfg:MfgItem.ExpandMask.Details.V1";
+
 	@Value("${threedx.space-url}")
 	private String space3dsUrlStr;
 
@@ -32,10 +43,6 @@ public class ManufacturingItemExpandController {
 	private final Service3DXConnexion service3DXConnexion;
 	private final HttpRequestService httpRequestService;
 
-	private static final String SEARCH_ENDPOINT = "/resources/v1/modeler/dsmfg/dsmfg:MfgItem/search";
-
-	private static final String EXPAND_MASK = "dsmfg:MfgItem.ExpandMask.Details.V1";
-
 	public ManufacturingItemExpandController(Service3DXConnexion service3DXConnexion,
 			HttpRequestService httpRequestService) {
 
@@ -44,26 +51,31 @@ public class ManufacturingItemExpandController {
 	}
 
 	/**
-	 * Search + Expand
+	 * Recherche un Manufacturing Item puis développe sa structure.
 	 *
-	 * Exemple :
+	 * L'API retourne une structure métier simplifiée pour Copilot Studio.
+	 *
+	 * Exemples :
 	 *
 	 * GET /manufacturing-items/expand-search
+	 * ?searchStr=07DC3E34F45D00006436D875000568D7
 	 *
-	 * GET /manufacturing-items/expand-search?searchStr=*
-	 *
-	 * GET /manufacturing-items/expand-search ?searchStr=current=="Released"
+	 * GET /manufacturing-items/expand-search ?searchStr=title=="M_PART_2413"
 	 */
+	@SuppressWarnings("unchecked")
 	@GetMapping(value = "/expand-search", produces = MediaType.APPLICATION_JSON_VALUE)
 	public JSONObject expandManufacturingItemsBySearch(@RequestParam(required = false) String searchStr)
 			throws Exception {
 
+		/*
+		 * 1. Critère de recherche par défaut
+		 */
 		if (searchStr == null || searchStr.isBlank()) {
 			searchStr = "*";
 		}
 
 		/*
-		 * Authentification 3DX
+		 * 2. Préparation de l'authentification
 		 */
 		service3DXConnexion.prepareAuthorizationHeaderValue();
 
@@ -72,13 +84,63 @@ public class ManufacturingItemExpandController {
 		Map<String, String> headers = createSecurityHeaders(csrfToken);
 
 		/*
-		 * Search
+		 * 3. Recherche du Manufacturing Item racine
 		 */
+		JSONObject searchResult = searchFirstManufacturingItem(searchStr, headers);
+
+		if (searchResult == null) {
+
+			JSONObject response = new JSONObject();
+
+			response.put("success", false);
+			response.put("searchCriteria", searchStr);
+			response.put("message", "No Manufacturing Item found for the provided search criteria.");
+
+			return response;
+		}
+
+		String rootPhysicalId = getFirstString(searchResult, "physicalId", "physicalid", "id");
+
+		if (rootPhysicalId.isBlank()) {
+
+			JSONObject response = new JSONObject();
+
+			response.put("success", false);
+			response.put("searchCriteria", searchStr);
+			response.put("message", "The Manufacturing Item found does not contain a physicalId.");
+
+			return response;
+		}
+
+		/*
+		 * 4. Appel de l'API Expand
+		 */
+		JSONObject rawExpandResponse = expandManufacturingItem(rootPhysicalId, headers);
+
+		/*
+		 * 5. Transformation du résultat technique en structure métier simplifiée.
+		 */
+		return buildCopilotResponse(searchStr, rootPhysicalId, rawExpandResponse);
+	}
+
+	/**
+	 * Recherche le premier Manufacturing Item correspondant.
+	 */
+	private JSONObject searchFirstManufacturingItem(String searchStr, Map<String, String> headers) throws Exception {
+
 		String encodedSearchStr = URLEncoder.encode(searchStr, StandardCharsets.UTF_8);
 
 		String searchUrl = space3dsUrlStr + SEARCH_ENDPOINT + "?$searchStr=" + encodedSearchStr + "&$top=1";
 
+		System.out.println("==========================================");
+		System.out.println("3DX MANUFACTURING ITEM SEARCH");
+		System.out.println("Search criteria : " + searchStr);
+		System.out.println("Search URL      : " + searchUrl);
+		System.out.println("==========================================");
+
 		HttpResponse<String> searchResponse = httpRequestService.loadUrl("GET", "", "", searchUrl, headers);
+
+		System.out.println("Search status : " + searchResponse.statusCode());
 
 		if (searchResponse.statusCode() != 200) {
 
@@ -88,56 +150,307 @@ public class ManufacturingItemExpandController {
 
 		JSONParser parser = new JSONParser();
 
-		JSONObject searchJson = (JSONObject) parser.parse(searchResponse.body());
+		Object parsedResponse = parser.parse(searchResponse.body());
 
-		JSONArray members = findMembers(searchJson);
-
-		JSONObject response = new JSONObject();
-
-		if (members == null || members.isEmpty()) {
-
-			response.put("success", false);
-			response.put("message", "No Manufacturing Item found");
-
-			return response;
+		if (!(parsedResponse instanceof JSONObject)) {
+			return null;
 		}
 
-		JSONObject rootItem = (JSONObject) members.get(0);
+		JSONObject searchJson = (JSONObject) parsedResponse;
 
-		String physicalId = getFirstString(rootItem, "physicalId", "physicalid", "id");
+		JSONArray members = findMembersArray(searchJson);
 
-		/*
-		 * Expand
-		 */
-		String expandUrl = space3dsUrlStr + "/resources/v1/modeler/dsmfg/dsmfg:MfgItem/" + physicalId + "/expand?$mask="
-				+ EXPAND_MASK;
+		if (members == null || members.isEmpty()) {
+			return null;
+		}
+
+		Object firstResult = members.get(0);
+
+		if (!(firstResult instanceof JSONObject)) {
+			return null;
+		}
+
+		return (JSONObject) firstResult;
+	}
+
+	/**
+	 * Effectue le POST Expand.
+	 *
+	 * Body envoyé :
+	 *
+	 * { "expandDepth": -1, "withPath": true }
+	 */
+	@SuppressWarnings("unchecked")
+	private JSONObject expandManufacturingItem(String physicalId, Map<String, String> headers) throws Exception {
+
+		String encodedPhysicalId = URLEncoder.encode(physicalId, StandardCharsets.UTF_8);
+
+		String expandUrl = space3dsUrlStr + MFG_ITEM_ENDPOINT + encodedPhysicalId + "/expand?$mask=" + EXPAND_MASK;
 
 		JSONObject expandBody = new JSONObject();
 
 		expandBody.put("expandDepth", -1);
+		expandBody.put("withPath", Boolean.TRUE);
 
-		expandBody.put("withPath", true);
+		String requestBody = expandBody.toJSONString();
 
-		HttpResponse<String> expandResponse = httpRequestService.loadUrl("POST", "", expandBody.toJSONString(),
-				expandUrl, headers);
+		System.out.println("==========================================");
+		System.out.println("3DX MANUFACTURING ITEM EXPAND");
+		System.out.println("Root physicalId : " + physicalId);
+		System.out.println("Expand URL      : " + expandUrl);
+		System.out.println("Request body    : " + requestBody);
+		System.out.println("==========================================");
+
+		HttpResponse<String> expandResponse = httpRequestService.loadUrl("POST", "",requestBody, expandUrl, headers);
+
+		System.out.println("Expand status : " + expandResponse.statusCode());
 
 		if (expandResponse.statusCode() != 200 && expandResponse.statusCode() != 201) {
 
-			throw new RuntimeException("Manufacturing Item Expand failed. " + "Status=" + expandResponse.statusCode()
-					+ " Response=" + expandResponse.body());
+			throw new RuntimeException("Manufacturing Item Expand failed. " + "PhysicalId=" + physicalId + " Status="
+					+ expandResponse.statusCode() + " Response=" + expandResponse.body());
+		}
+
+		if (expandResponse.body() == null || expandResponse.body().isBlank()) {
+
+			return new JSONObject();
+		}
+
+		JSONParser parser = new JSONParser();
+
+		Object parsedResponse = parser.parse(expandResponse.body());
+
+		if (parsedResponse instanceof JSONObject) {
+			return (JSONObject) parsedResponse;
 		}
 
 		/*
-		 * Retourne directement le JSON du Expand
+		 * Cas exceptionnel où la réponse racine est directement un tableau.
 		 */
-		return (JSONObject) parser.parse(expandResponse.body());
+		if (parsedResponse instanceof JSONArray) {
+
+			JSONObject wrapper = new JSONObject();
+
+			wrapper.put("member", parsedResponse);
+
+			return wrapper;
+		}
+
+		return new JSONObject();
 	}
 
-	private JSONArray findMembers(JSONObject json) {
+	/**
+	 * Transforme la réponse technique de l'Expand en réponse lisible par Copilot
+	 * Studio.
+	 */
+	@SuppressWarnings("unchecked")
+	private JSONObject buildCopilotResponse(String searchStr, String rootPhysicalId, JSONObject expandResponse) {
 
-		String[] keys = { "member", "members", "results", "items", "mfgItems" };
+		JSONArray members = findMembersArray(expandResponse);
 
-		for (String key : keys) {
+		/*
+		 * Références métier :
+		 *
+		 * CreateMaterial Provide Process...
+		 *
+		 * La clé est le physicalId de la référence.
+		 */
+		Map<String, JSONObject> businessItems = new LinkedHashMap<>();
+
+		/*
+		 * Relations parent -> enfants.
+		 *
+		 * Les DELFmiFunctionIdentifiedInstance contiennent : - parent - reference
+		 */
+		Map<String, List<String>> childrenByParent = new LinkedHashMap<>();
+
+		if (members != null) {
+
+			for (Object memberObject : members) {
+
+				if (!(memberObject instanceof JSONObject)) {
+					continue;
+				}
+
+				JSONObject member = (JSONObject) memberObject;
+
+				/*
+				 * Un objet contenant path uniquement ne représente pas un Manufacturing Item.
+				 */
+				if (member.containsKey("path") && !member.containsKey("id")) {
+
+					continue;
+				}
+
+				String id = getFirstString(member, "physicalId", "physicalid", "id");
+
+				String parentId = getFirstString(member, "parent");
+
+				String referenceId = getFirstString(member, "reference");
+
+				/*
+				 * Objet représentant une relation d'instance.
+				 */
+				if (!parentId.isBlank() && !referenceId.isBlank()) {
+
+					childrenByParent.computeIfAbsent(parentId, key -> new ArrayList<>()).add(referenceId);
+
+					continue;
+				}
+
+				/*
+				 * Objet métier.
+				 */
+				if (!id.isBlank()) {
+
+					businessItems.putIfAbsent(id, member);
+				}
+			}
+		}
+
+		/*
+		 * Construction de l'arbre récursif.
+		 */
+		Set<String> visited = new HashSet<>();
+
+		JSONObject root = buildHierarchyNode(rootPhysicalId, businessItems, childrenByParent, visited, 0);
+
+		/*
+		 * Liste plate de tous les objets métier. Elle facilite aussi l'exploitation par
+		 * Copilot.
+		 */
+		JSONArray flatItems = new JSONArray();
+
+		for (JSONObject item : businessItems.values()) {
+
+			flatItems.add(simplifyBusinessItem(item));
+		}
+
+		JSONObject response = new JSONObject();
+
+		response.put("success", true);
+
+		response.put("source", "3DEXPERIENCE_MANUFACTURING_EXPAND");
+
+		response.put("searchCriteria", searchStr);
+
+		response.put("rootPhysicalId", rootPhysicalId);
+
+		response.put("totalBusinessItems", businessItems.size());
+
+		response.put("root", root);
+
+		response.put("items", flatItems);
+
+		return response;
+	}
+
+	/**
+	 * Construit récursivement un nœud de la hiérarchie.
+	 */
+	@SuppressWarnings("unchecked")
+	private JSONObject buildHierarchyNode(String physicalId, Map<String, JSONObject> businessItems,
+			Map<String, List<String>> childrenByParent, Set<String> visited, int level) {
+
+		JSONObject sourceItem = businessItems.get(physicalId);
+
+		JSONObject node;
+
+		if (sourceItem != null) {
+			node = simplifyBusinessItem(sourceItem);
+		} else {
+
+			/*
+			 * Cas où la relation référence un objet absent de la réponse Expand.
+			 */
+			node = new JSONObject();
+			node.put("physicalId", physicalId);
+			node.put("title", "");
+			node.put("type", "");
+		}
+
+		node.put("level", level);
+
+		JSONArray children = new JSONArray();
+
+		/*
+		 * Protection contre une éventuelle boucle dans la structure.
+		 */
+		if (visited.contains(physicalId)) {
+
+			node.put("cycleDetected", true);
+			node.put("children", children);
+
+			return node;
+		}
+
+		visited.add(physicalId);
+
+		List<String> childIds = childrenByParent.get(physicalId);
+
+		if (childIds != null) {
+
+			for (String childId : childIds) {
+
+				/*
+				 * Une copie du chemin visité est utilisée pour chaque branche.
+				 */
+				Set<String> branchVisited = new HashSet<>(visited);
+
+				JSONObject childNode = buildHierarchyNode(childId, businessItems, childrenByParent, branchVisited,
+						level + 1);
+
+				children.add(childNode);
+			}
+		}
+
+		node.put("children", children);
+
+		return node;
+	}
+
+	/**
+	 * Conserve uniquement les informations métier utiles pour l'agent Copilot.
+	 */
+	@SuppressWarnings("unchecked")
+	private JSONObject simplifyBusinessItem(JSONObject source) {
+
+		JSONObject item = new JSONObject();
+
+		item.put("physicalId", getFirstString(source, "physicalId", "physicalid", "id"));
+
+		item.put("name", getFirstString(source, "name"));
+
+		item.put("title", getFirstString(source, "title"));
+
+		item.put("type", getFirstString(source, "type"));
+
+		item.put("revision", getFirstString(source, "revision"));
+
+		item.put("state", getFirstString(source, "state", "current", "maturity"));
+
+		item.put("owner", getFirstString(source, "owner"));
+
+		item.put("organization", getFirstString(source, "organization"));
+
+		item.put("collabSpace", getFirstString(source, "collabSpace", "collabspace", "collaborativeSpace"));
+
+		return item;
+	}
+
+	/**
+	 * Recherche le tableau principal de résultats.
+	 */
+	private JSONArray findMembersArray(JSONObject json) {
+
+		if (json == null) {
+			return null;
+		}
+
+		String[] possibleKeys = { "member", "members", "manufacturingItem", "manufacturingItems", "mfgItem", "mfgItems",
+				"items", "results" };
+
+		for (String key : possibleKeys) {
 
 			Object value = json.get(key);
 
@@ -149,9 +462,12 @@ public class ManufacturingItemExpandController {
 		return null;
 	}
 
+	/**
+	 * Retourne la première valeur non vide parmi les clés fournies.
+	 */
 	private String getFirstString(JSONObject json, String... keys) {
 
-		if (json == null) {
+		if (json == null || keys == null) {
 			return "";
 		}
 
@@ -159,15 +475,23 @@ public class ManufacturingItemExpandController {
 
 			Object value = json.get(key);
 
-			if (value != null && !value.toString().isBlank()) {
+			if (value == null) {
+				continue;
+			}
 
-				return value.toString();
+			String stringValue = value.toString();
+
+			if (!stringValue.isBlank()) {
+				return stringValue;
 			}
 		}
 
 		return "";
 	}
 
+	/**
+	 * Headers utilisés par Search et Expand.
+	 */
 	private Map<String, String> createSecurityHeaders(String csrfToken) {
 
 		Map<String, String> headers = new HashMap<>();
@@ -178,7 +502,10 @@ public class ManufacturingItemExpandController {
 
 		headers.put("Content-Type", MediaType.APPLICATION_JSON_VALUE);
 
-		headers.put("ENO_CSRF_TOKEN", csrfToken);
+		if (csrfToken != null && !csrfToken.isBlank()) {
+
+			headers.put("ENO_CSRF_TOKEN", csrfToken);
+		}
 
 		return headers;
 	}

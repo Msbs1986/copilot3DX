@@ -111,6 +111,11 @@ public class EngineeringItemExpandService {
 					+ " Response=" + searchResponse.body());
 		}
 
+		if (searchResponse.body() == null || searchResponse.body().isBlank()) {
+
+			return null;
+		}
+
 		JSONParser parser = new JSONParser();
 
 		Object parsedResponse = parser.parse(searchResponse.body());
@@ -136,6 +141,7 @@ public class EngineeringItemExpandService {
 		return (JSONObject) firstResult;
 	}
 
+	@SuppressWarnings("unchecked")
 	private JSONObject expandEngineeringItem(String physicalId, Map<String, String> headers) throws Exception {
 
 		String encodedPhysicalId = URLEncoder.encode(physicalId, StandardCharsets.UTF_8);
@@ -144,36 +150,42 @@ public class EngineeringItemExpandService {
 
 		JSONObject expandBody = new JSONObject();
 
-		expandBody.put("expandDepth", -1);
-		expandBody.put("withPath", Boolean.FALSE);
+		expandBody.put("expandDepth", Long.valueOf(-1));
 
-		JSONArray typeFilterBo = new JSONArray();
-		typeFilterBo.add("VPMReference");
-		typeFilterBo.add("Drawing");
+		/*
+		 * Obligatoire pour essayer de récupérer les chemins permettant de reconstruire
+		 * les niveaux de l'EBOM.
+		 */
+		expandBody.put("withPath", Boolean.TRUE);
 
-		expandBody.put("type_filter_bo", typeFilterBo);
+		JSONArray businessObjectTypes = new JSONArray();
 
-		JSONArray typeFilterRel = new JSONArray();
-		typeFilterRel.add("VPMInstance");
-		typeFilterRel.add("VPMRepInstance");
+		businessObjectTypes.add("VPMReference");
+		businessObjectTypes.add("Drawing");
 
-		expandBody.put("type_filter_rel", typeFilterRel);
+		expandBody.put("type_filter_bo", businessObjectTypes);
+
+		JSONArray relationshipTypes = new JSONArray();
+
+		relationshipTypes.add("VPMInstance");
+		relationshipTypes.add("VPMRepInstance");
+
+		expandBody.put("type_filter_rel", relationshipTypes);
 
 		String requestBody = expandBody.toJSONString();
-
-		System.out.println("Request body : " + requestBody);
 
 		System.out.println("==========================================");
 		System.out.println("3DX ENGINEERING ITEM EXPAND");
 		System.out.println("Root physicalId : " + physicalId);
 		System.out.println("Expand URL      : " + expandUrl);
+		System.out.println("Request body    : " + requestBody);
 		System.out.println("==========================================");
 
 		HttpResponse<String> expandResponse = httpRequestService.loadUrl("POST", "", requestBody, expandUrl, headers);
 
 		System.out.println("Expand status : " + expandResponse.statusCode());
 
-		if (expandResponse.statusCode() != 200) {
+		if (expandResponse.statusCode() != 200 && expandResponse.statusCode() != 201) {
 
 			throw new RuntimeException("Engineering Item Expand failed. " + "PhysicalId=" + physicalId + " Status="
 					+ expandResponse.statusCode() + " Response=" + expandResponse.body());
@@ -195,6 +207,7 @@ public class EngineeringItemExpandService {
 		if (parsedResponse instanceof JSONArray) {
 
 			JSONObject wrapper = new JSONObject();
+
 			wrapper.put("member", parsedResponse);
 
 			return wrapper;
@@ -208,91 +221,80 @@ public class EngineeringItemExpandService {
 
 		JSONArray members = findMembersArray(expandResponse);
 
-		Map<String, JSONObject> engineeringItems = new LinkedHashMap<>();
+		Map<String, JSONObject> businessObjects = new LinkedHashMap<>();
 
-		Map<String, JSONObject> instances = new LinkedHashMap<>();
+		Map<String, JSONObject> relationships = new LinkedHashMap<>();
 
-		Map<String, String> referenceIdByCestamp = new HashMap<>();
+		Map<String, String> businessObjectIdByCestamp = new HashMap<>();
 
 		Map<String, List<String>> childrenByParent = new LinkedHashMap<>();
 
+		JSONArray unresolvedRelationships = new JSONArray();
+
 		if (members != null) {
 
-			for (Object memberObject : members) {
+			collectBusinessObjects(members, businessObjects, businessObjectIdByCestamp);
 
-				if (!(memberObject instanceof JSONObject)) {
-					continue;
-				}
+			collectRelationships(members, relationships);
 
-				JSONObject member = (JSONObject) memberObject;
-
-				String type = getFirstString(member, "type");
-
-				String id = getFirstString(member, "physicalId", "physicalid", "id");
-
-				if (id.isBlank()) {
-					continue;
-				}
-
-				if (isEngineeringReference(type)) {
-
-					engineeringItems.putIfAbsent(id, member);
-
-					String cestamp = getFirstString(member, "cestamp");
-
-					if (!cestamp.isBlank()) {
-
-						referenceIdByCestamp.putIfAbsent(cestamp, id);
-					}
-
-				} else if (isEngineeringInstance(type)) {
-
-					instances.putIfAbsent(id, member);
-				}
-			}
-
-			buildRelationsFromExplicitFields(members, childrenByParent);
-
-			buildRelationsFromPaths(members, rootPhysicalId, childrenByParent);
-
-			buildRelationsFromInstances(rootPhysicalId, instances, referenceIdByCestamp, childrenByParent);
+			buildHierarchyRelations(members, rootPhysicalId, businessObjects, businessObjectIdByCestamp,
+					childrenByParent, unresolvedRelationships);
 		}
 
-		JSONObject root = buildHierarchyNode(rootPhysicalId, engineeringItems, childrenByParent, new HashSet<>(), 0);
+		JSONObject root = buildHierarchyNode(rootPhysicalId, "", businessObjects, childrenByParent, new HashSet<>(), 0);
 
 		JSONArray flatItems = new JSONArray();
 
-		for (JSONObject item : engineeringItems.values()) {
-			flatItems.add(simplifyEngineeringItem(item));
-		}
+		buildFlatHierarchy(root, flatItems);
 
-		JSONArray flatInstances = new JSONArray();
+		JSONArray flatRelationships = new JSONArray();
 
-		for (JSONObject instance : instances.values()) {
-			flatInstances.add(simplifyEngineeringInstance(instance, referenceIdByCestamp));
+		for (JSONObject relationship : relationships.values()) {
+
+			flatRelationships.add(simplifyRelationship(relationship, businessObjectIdByCestamp));
 		}
 
 		JSONObject response = new JSONObject();
 
 		response.put("success", true);
+
 		response.put("source", "3DEXPERIENCE_ENGINEERING_EXPAND");
 
 		response.put("structureType", "EBOM");
+
 		response.put("searchCriteria", searchStr);
+
 		response.put("rootPhysicalId", rootPhysicalId);
 
-		response.put("totalEngineeringItems", engineeringItems.size());
+		response.put("totalBusinessObjects", businessObjects.size());
 
-		response.put("totalInstances", instances.size());
+		response.put("totalRelationships", relationships.size());
+
+		response.put("totalStructureItems", flatItems.size());
 
 		response.put("root", root);
+
 		response.put("items", flatItems);
-		response.put("instances", flatInstances);
+
+		response.put("relationships", flatRelationships);
+
+		response.put("unresolvedRelationships", unresolvedRelationships);
+
+		boolean structureReliable = unresolvedRelationships.isEmpty();
+
+		response.put("structureReliable", structureReliable);
+
+		if (!structureReliable) {
+
+			response.put("warning", "Some relationships do not contain sufficient "
+					+ "parent or path information to determine " + "their exact level in the EBOM.");
+		}
 
 		return response;
 	}
 
-	private void buildRelationsFromExplicitFields(JSONArray members, Map<String, List<String>> childrenByParent) {
+	private void collectBusinessObjects(JSONArray members, Map<String, JSONObject> businessObjects,
+			Map<String, String> businessObjectIdByCestamp) {
 
 		for (Object memberObject : members) {
 
@@ -302,127 +304,271 @@ public class EngineeringItemExpandService {
 
 			JSONObject member = (JSONObject) memberObject;
 
-			String parentId = getFirstString(member, "parent", "parentId", "parentPhysicalId");
+			String type = getFirstString(member, "type");
 
-			String referenceId = getFirstString(member, "reference", "referenceId", "child", "childId",
-					"childPhysicalId");
+			if (!isSupportedBusinessObject(type)) {
+				continue;
+			}
 
-			if (!parentId.isBlank() && !referenceId.isBlank()) {
+			String id = getFirstString(member, "physicalId", "physicalid", "id");
 
-				addChildRelation(childrenByParent, parentId, referenceId);
+			if (id.isBlank()) {
+				continue;
+			}
+
+			businessObjects.putIfAbsent(id, member);
+
+			String cestamp = getFirstString(member, "cestamp");
+
+			if (!cestamp.isBlank()) {
+
+				businessObjectIdByCestamp.putIfAbsent(cestamp, id);
 			}
 		}
 	}
 
-	private void buildRelationsFromPaths(JSONArray members, String rootPhysicalId,
+	private void collectRelationships(JSONArray members, Map<String, JSONObject> relationships) {
+
+		for (Object memberObject : members) {
+
+			if (!(memberObject instanceof JSONObject)) {
+				continue;
+			}
+
+			JSONObject member = (JSONObject) memberObject;
+
+			String type = getFirstString(member, "type");
+
+			if (!isSupportedRelationship(type)) {
+				continue;
+			}
+
+			String id = getFirstString(member, "physicalId", "physicalid", "id");
+
+			if (!id.isBlank()) {
+
+				relationships.putIfAbsent(id, member);
+			}
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private void buildHierarchyRelations(JSONArray members, String rootPhysicalId,
+			Map<String, JSONObject> businessObjects, Map<String, String> businessObjectIdByCestamp,
+			Map<String, List<String>> childrenByParent, JSONArray unresolvedRelationships) {
+
+		/*
+		 * Première tentative : lecture des objets contenant directement un path.
+		 * Certaines versions 3DEXPERIENCE retournent des membres dédiés au chemin sans
+		 * type métier classique.
+		 */
+		for (Object memberObject : members) {
+
+			if (!(memberObject instanceof JSONObject)) {
+				continue;
+			}
+
+			JSONObject member = (JSONObject) memberObject;
+
+			buildRelationsFromPathObject(member, rootPhysicalId, businessObjects, businessObjectIdByCestamp,
+					childrenByParent);
+		}
+
+		/*
+		 * Deuxième tentative : lecture des VPMInstance et VPMRepInstance.
+		 */
+		for (Object memberObject : members) {
+
+			if (!(memberObject instanceof JSONObject)) {
+				continue;
+			}
+
+			JSONObject relationship = (JSONObject) memberObject;
+
+			String relationshipType = getFirstString(relationship, "type");
+
+			if (!isSupportedRelationship(relationshipType)) {
+
+				continue;
+			}
+
+			String childBusinessObjectId = resolveChildBusinessObjectId(relationship, businessObjectIdByCestamp);
+
+			if (childBusinessObjectId.isBlank()) {
+
+				unresolvedRelationships.add(
+						createUnresolvedRelationship(relationship, "", "Unable to resolve the child Business Object."));
+
+				continue;
+			}
+
+			String parentBusinessObjectId = resolveParentBusinessObjectId(relationship);
+
+			if (!parentBusinessObjectId.isBlank()) {
+
+				addChildRelation(childrenByParent, parentBusinessObjectId, childBusinessObjectId);
+
+				continue;
+			}
+
+			List<String> pathIds = extractBusinessObjectPath(relationship.get("path"), businessObjects,
+					businessObjectIdByCestamp);
+
+			if (!pathIds.isEmpty()) {
+
+				completeAndAddPath(pathIds, rootPhysicalId, childBusinessObjectId, childrenByParent);
+
+				continue;
+			}
+
+			/*
+			 * Si une autre entrée path a déjà créé la relation, l'occurrence est considérée
+			 * comme résolue.
+			 */
+			if (isChildAlreadyLinked(childrenByParent, childBusinessObjectId)) {
+
+				continue;
+			}
+
+			unresolvedRelationships.add(createUnresolvedRelationship(relationship, childBusinessObjectId,
+					"No parent or path information was returned."));
+		}
+	}
+
+	private void buildRelationsFromPathObject(JSONObject member, String rootPhysicalId,
+			Map<String, JSONObject> businessObjects, Map<String, String> businessObjectIdByCestamp,
 			Map<String, List<String>> childrenByParent) {
 
-		for (Object memberObject : members) {
+		String parentId = resolveParentBusinessObjectId(member);
 
-			if (!(memberObject instanceof JSONObject)) {
-				continue;
-			}
+		String childId = resolveChildBusinessObjectId(member, businessObjectIdByCestamp);
 
-			JSONObject member = (JSONObject) memberObject;
+		if (!parentId.isBlank() && !childId.isBlank()) {
 
-			Object pathObject = member.get("path");
-
-			if (!(pathObject instanceof JSONArray)) {
-				continue;
-			}
-
-			JSONArray path = (JSONArray) pathObject;
-
-			List<String> pathIds = extractPathIds(path);
-
-			if (pathIds.isEmpty()) {
-				continue;
-			}
-
-			if (!rootPhysicalId.equals(pathIds.get(0))) {
-				pathIds.add(0, rootPhysicalId);
-			}
-
-			for (int index = 0; index < pathIds.size() - 1; index++) {
-
-				String parentId = pathIds.get(index);
-				String childId = pathIds.get(index + 1);
-
-				addChildRelation(childrenByParent, parentId, childId);
-			}
+			addChildRelation(childrenByParent, parentId, childId);
 		}
+
+		List<String> pathIds = extractBusinessObjectPath(member.get("path"), businessObjects,
+				businessObjectIdByCestamp);
+
+		if (pathIds.isEmpty()) {
+			return;
+		}
+
+		if (!rootPhysicalId.equals(pathIds.get(0))) {
+
+			pathIds.add(0, rootPhysicalId);
+		}
+
+		if (!childId.isBlank() && !pathIds.contains(childId)) {
+
+			pathIds.add(childId);
+		}
+
+		addPathRelations(pathIds, childrenByParent);
 	}
 
-	private void buildRelationsFromInstances(String rootPhysicalId, Map<String, JSONObject> instances,
-			Map<String, String> referenceIdByCestamp, Map<String, List<String>> childrenByParent) {
+	private String resolveParentBusinessObjectId(JSONObject relationship) {
 
-		for (JSONObject instance : instances.values()) {
-
-			String childReferenceId = getFirstString(instance, "reference", "referenceId", "child", "childId");
-
-			if (childReferenceId.isBlank()) {
-
-				String cestamp = getFirstString(instance, "cestamp");
-
-				childReferenceId = referenceIdByCestamp.getOrDefault(cestamp, "");
-			}
-
-			if (childReferenceId.isBlank()) {
-				continue;
-			}
-
-			String parentReferenceId = getFirstString(instance, "parent", "parentId", "parentReference",
-					"parentReferenceId");
-
-			if (parentReferenceId.isBlank()) {
-
-				/*
-				 * Fallback pour la réponse actuelle.
-				 *
-				 * Dans le JSON fourni, les VPMInstance permettent d'identifier les VPMReference
-				 * enfants grâce au cestamp, mais aucun parent n'est retourné.
-				 *
-				 * On considère donc que ces occurrences sont des enfants directs de la racine.
-				 */
-				parentReferenceId = rootPhysicalId;
-			}
-
-			if (!parentReferenceId.equals(childReferenceId)) {
-
-				addChildRelation(childrenByParent, parentReferenceId, childReferenceId);
-			}
-		}
+		return getFirstString(relationship, "parent", "parentId", "parentPhysicalId", "parentReference",
+				"parentReferenceId", "parentphysicalid");
 	}
 
-	private List<String> extractPathIds(JSONArray path) {
+	private String resolveChildBusinessObjectId(JSONObject relationship,
+			Map<String, String> businessObjectIdByCestamp) {
+
+		String referenceId = getFirstString(relationship, "reference", "referenceId", "referencePhysicalId", "child",
+				"childId", "childPhysicalId", "childReference", "childReferenceId");
+
+		if (!referenceId.isBlank()) {
+			return referenceId;
+		}
+
+		String cestamp = getFirstString(relationship, "cestamp");
+
+		if (cestamp.isBlank()) {
+			return "";
+		}
+
+		return businessObjectIdByCestamp.getOrDefault(cestamp, "");
+	}
+
+	private void completeAndAddPath(List<String> pathIds, String rootPhysicalId, String childBusinessObjectId,
+			Map<String, List<String>> childrenByParent) {
+
+		if (!rootPhysicalId.equals(pathIds.get(0))) {
+
+			pathIds.add(0, rootPhysicalId);
+		}
+
+		if (!pathIds.contains(childBusinessObjectId)) {
+
+			pathIds.add(childBusinessObjectId);
+		}
+
+		addPathRelations(pathIds, childrenByParent);
+	}
+
+	private List<String> extractBusinessObjectPath(Object pathObject, Map<String, JSONObject> businessObjects,
+			Map<String, String> businessObjectIdByCestamp) {
 
 		List<String> pathIds = new ArrayList<>();
 
-		for (Object pathElement : path) {
+		if (pathObject == null) {
+			return pathIds;
+		}
 
-			if (pathElement == null) {
-				continue;
+		if (pathObject instanceof JSONArray) {
+
+			JSONArray pathArray = (JSONArray) pathObject;
+
+			for (Object pathElement : pathArray) {
+
+				String resolvedId = resolvePathElement(pathElement, businessObjects, businessObjectIdByCestamp);
+
+				addUniquePathId(pathIds, resolvedId);
 			}
 
-			if (pathElement instanceof String) {
+			return pathIds;
+		}
 
-				String id = pathElement.toString();
+		if (pathObject instanceof JSONObject) {
 
-				if (!id.isBlank()) {
-					pathIds.add(id);
-				}
+			JSONObject pathJson = (JSONObject) pathObject;
 
-				continue;
+			Object membersObject = getFirstObject(pathJson, "member", "members", "items", "path");
+
+			if (membersObject != null && membersObject != pathObject) {
+
+				return extractBusinessObjectPath(membersObject, businessObjects, businessObjectIdByCestamp);
 			}
 
-			if (pathElement instanceof JSONObject) {
+			String resolvedId = resolvePathElement(pathJson, businessObjects, businessObjectIdByCestamp);
 
-				JSONObject pathObject = (JSONObject) pathElement;
+			addUniquePathId(pathIds, resolvedId);
 
-				String id = getFirstString(pathObject, "physicalId", "physicalid", "id", "reference", "referenceId");
+			return pathIds;
+		}
 
-				if (!id.isBlank()) {
-					pathIds.add(id);
+		if (pathObject instanceof String) {
+
+			String pathString = pathObject.toString().trim();
+
+			if (pathString.isBlank()) {
+				return pathIds;
+			}
+
+			String normalizedPath = pathString.replace("[", "").replace("]", "").replace("\"", "");
+
+			String[] pathParts = normalizedPath.split("[/,;>|]");
+
+			for (String pathPart : pathParts) {
+
+				String candidate = pathPart.trim();
+
+				if (businessObjects.containsKey(candidate)) {
+
+					addUniquePathId(pathIds, candidate);
 				}
 			}
 		}
@@ -430,9 +576,99 @@ public class EngineeringItemExpandService {
 		return pathIds;
 	}
 
+	private String resolvePathElement(Object pathElement, Map<String, JSONObject> businessObjects,
+			Map<String, String> businessObjectIdByCestamp) {
+
+		if (pathElement == null) {
+			return "";
+		}
+
+		if (pathElement instanceof String) {
+
+			String candidate = pathElement.toString().trim();
+
+			if (businessObjects.containsKey(candidate)) {
+
+				return candidate;
+			}
+
+			return "";
+		}
+
+		if (!(pathElement instanceof JSONObject)) {
+			return "";
+		}
+
+		JSONObject pathJson = (JSONObject) pathElement;
+
+		String id = getFirstString(pathJson, "physicalId", "physicalid", "id", "reference", "referenceId", "child",
+				"childId");
+
+		if (businessObjects.containsKey(id)) {
+			return id;
+		}
+
+		String cestamp = getFirstString(pathJson, "cestamp");
+
+		if (cestamp.isBlank()) {
+			return "";
+		}
+
+		return businessObjectIdByCestamp.getOrDefault(cestamp, "");
+	}
+
+	private Object getFirstObject(JSONObject json, String... keys) {
+
+		if (json == null || keys == null) {
+			return null;
+		}
+
+		for (String key : keys) {
+
+			Object value = json.get(key);
+
+			if (value != null) {
+				return value;
+			}
+		}
+
+		return null;
+	}
+
+	private void addUniquePathId(List<String> pathIds, String physicalId) {
+
+		if (physicalId == null || physicalId.isBlank()) {
+
+			return;
+		}
+
+		if (!pathIds.contains(physicalId)) {
+			pathIds.add(physicalId);
+		}
+	}
+
+	private void addPathRelations(List<String> pathIds, Map<String, List<String>> childrenByParent) {
+
+		if (pathIds == null || pathIds.size() < 2) {
+
+			return;
+		}
+
+		for (int index = 0; index < pathIds.size() - 1; index++) {
+
+			String parentId = pathIds.get(index);
+
+			String childId = pathIds.get(index + 1);
+
+			addChildRelation(childrenByParent, parentId, childId);
+		}
+	}
+
 	private void addChildRelation(Map<String, List<String>> childrenByParent, String parentId, String childId) {
 
-		if (parentId == null || parentId.isBlank() || childId == null || childId.isBlank()) {
+		if (parentId == null || parentId.isBlank() || childId == null || childId.isBlank()
+				|| parentId.equals(childId)) {
+
 			return;
 		}
 
@@ -443,29 +679,45 @@ public class EngineeringItemExpandService {
 		}
 	}
 
-	@SuppressWarnings("unchecked")
-	private JSONObject buildHierarchyNode(String physicalId, Map<String, JSONObject> engineeringItems,
-			Map<String, List<String>> childrenByParent, Set<String> visited, int level) {
+	private boolean isChildAlreadyLinked(Map<String, List<String>> childrenByParent, String childId) {
 
-		JSONObject sourceItem = engineeringItems.get(physicalId);
+		for (List<String> children : childrenByParent.values()) {
+
+			if (children.contains(childId)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	@SuppressWarnings("unchecked")
+	private JSONObject buildHierarchyNode(String physicalId, String parentPhysicalId,
+			Map<String, JSONObject> businessObjects, Map<String, List<String>> childrenByParent, Set<String> visited,
+			int level) {
+
+		JSONObject sourceItem = businessObjects.get(physicalId);
 
 		JSONObject node;
 
 		if (sourceItem != null) {
 
-			node = simplifyEngineeringItem(sourceItem);
+			node = simplifyBusinessObject(sourceItem);
 
 		} else {
 
 			node = new JSONObject();
 
 			node.put("physicalId", physicalId);
+
 			node.put("name", "");
 			node.put("title", "");
 			node.put("type", "");
 			node.put("revision", "");
 			node.put("state", "");
 		}
+
+		node.put("parentPhysicalId", parentPhysicalId);
 
 		node.put("level", level);
 
@@ -474,6 +726,7 @@ public class EngineeringItemExpandService {
 		if (visited.contains(physicalId)) {
 
 			node.put("cycleDetected", true);
+
 			node.put("children", children);
 
 			return node;
@@ -489,8 +742,8 @@ public class EngineeringItemExpandService {
 
 				Set<String> branchVisited = new HashSet<>(visited);
 
-				JSONObject childNode = buildHierarchyNode(childId, engineeringItems, childrenByParent, branchVisited,
-						level + 1);
+				JSONObject childNode = buildHierarchyNode(childId, physicalId, businessObjects, childrenByParent,
+						branchVisited, level + 1);
 
 				children.add(childNode);
 			}
@@ -498,11 +751,65 @@ public class EngineeringItemExpandService {
 
 		node.put("children", children);
 
+		node.put("childrenCount", children.size());
+
 		return node;
 	}
 
 	@SuppressWarnings("unchecked")
-	private JSONObject simplifyEngineeringItem(JSONObject source) {
+	private void buildFlatHierarchy(JSONObject node, JSONArray flatItems) {
+
+		if (node == null) {
+			return;
+		}
+
+		JSONObject flatItem = new JSONObject();
+
+		flatItem.put("physicalId", getFirstString(node, "physicalId"));
+
+		flatItem.put("parentPhysicalId", getFirstString(node, "parentPhysicalId"));
+
+		flatItem.put("name", getFirstString(node, "name"));
+
+		flatItem.put("title", getFirstString(node, "title"));
+
+		flatItem.put("type", getFirstString(node, "type"));
+
+		flatItem.put("revision", getFirstString(node, "revision"));
+
+		flatItem.put("state", getFirstString(node, "state"));
+
+		flatItem.put("owner", getFirstString(node, "owner"));
+
+		flatItem.put("organization", getFirstString(node, "organization"));
+
+		flatItem.put("collabSpace", getFirstString(node, "collabSpace"));
+
+		flatItem.put("level", node.getOrDefault("level", Long.valueOf(0)));
+
+		flatItem.put("childrenCount", node.getOrDefault("childrenCount", Long.valueOf(0)));
+
+		flatItems.add(flatItem);
+
+		Object childrenObject = node.get("children");
+
+		if (!(childrenObject instanceof JSONArray)) {
+			return;
+		}
+
+		JSONArray children = (JSONArray) childrenObject;
+
+		for (Object childObject : children) {
+
+			if (childObject instanceof JSONObject) {
+
+				buildFlatHierarchy((JSONObject) childObject, flatItems);
+			}
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private JSONObject simplifyBusinessObject(JSONObject source) {
 
 		JSONObject item = new JSONObject();
 
@@ -534,45 +841,59 @@ public class EngineeringItemExpandService {
 	}
 
 	@SuppressWarnings("unchecked")
-	private JSONObject simplifyEngineeringInstance(JSONObject source, Map<String, String> referenceIdByCestamp) {
+	private JSONObject simplifyRelationship(JSONObject source, Map<String, String> businessObjectIdByCestamp) {
 
-		JSONObject instance = new JSONObject();
+		JSONObject relationship = new JSONObject();
 
-		String cestamp = getFirstString(source, "cestamp");
+		relationship.put("physicalId", getFirstString(source, "physicalId", "physicalid", "id"));
 
-		String referenceId = getFirstString(source, "reference", "referenceId", "child", "childId");
+		relationship.put("name", getFirstString(source, "name"));
 
-		if (referenceId.isBlank()) {
+		relationship.put("type", getFirstString(source, "type"));
 
-			referenceId = referenceIdByCestamp.getOrDefault(cestamp, "");
-		}
+		relationship.put("parentBusinessObjectPhysicalId", resolveParentBusinessObjectId(source));
 
-		instance.put("physicalId", getFirstString(source, "physicalId", "physicalid", "id"));
+		relationship.put("childBusinessObjectPhysicalId",
+				resolveChildBusinessObjectId(source, businessObjectIdByCestamp));
 
-		instance.put("name", getFirstString(source, "name"));
+		relationship.put("cestamp", getFirstString(source, "cestamp"));
 
-		instance.put("type", getFirstString(source, "type"));
+		relationship.put("created", getFirstString(source, "created"));
 
-		instance.put("referencePhysicalId", referenceId);
+		relationship.put("modified", getFirstString(source, "modified"));
 
-		instance.put("cestamp", cestamp);
-
-		instance.put("created", getFirstString(source, "created"));
-
-		instance.put("modified", getFirstString(source, "modified"));
-
-		return instance;
+		return relationship;
 	}
 
-	private boolean isEngineeringReference(String type) {
+	@SuppressWarnings("unchecked")
+	private JSONObject createUnresolvedRelationship(JSONObject relationship, String resolvedChildPhysicalId,
+			String reason) {
 
-		return "VPMReference".equalsIgnoreCase(type) || "Engineering Item".equalsIgnoreCase(type)
-				|| "Physical Product".equalsIgnoreCase(type);
+		JSONObject unresolved = new JSONObject();
+
+		unresolved.put("physicalId", getFirstString(relationship, "physicalId", "physicalid", "id"));
+
+		unresolved.put("name", getFirstString(relationship, "name"));
+
+		unresolved.put("type", getFirstString(relationship, "type"));
+
+		unresolved.put("cestamp", getFirstString(relationship, "cestamp"));
+
+		unresolved.put("resolvedChildPhysicalId", resolvedChildPhysicalId);
+
+		unresolved.put("reason", reason);
+
+		return unresolved;
 	}
 
-	private boolean isEngineeringInstance(String type) {
+	private boolean isSupportedBusinessObject(String type) {
 
-		return "VPMInstance".equalsIgnoreCase(type);
+		return "VPMReference".equalsIgnoreCase(type) || "Drawing".equalsIgnoreCase(type);
+	}
+
+	private boolean isSupportedRelationship(String type) {
+
+		return "VPMInstance".equalsIgnoreCase(type) || "VPMRepInstance".equalsIgnoreCase(type);
 	}
 
 	private JSONArray findMembersArray(JSONObject json) {

@@ -21,8 +21,13 @@ public class EngineeringItemExpandController {
 	}
 
 	@GetMapping(value = "/expand-search", produces = MediaType.APPLICATION_JSON_VALUE)
-	public JSONObject expandEngineeringItemsBySearch(@RequestParam(required = false) String searchStr)
+	public JSONObject expandEngineeringItemsBySearch(
+
+			@RequestParam(name = "searchStr", required = false) String searchStr)
+
 			throws Exception {
+
+		System.out.println("REST ENDPOINT CALLED: " + "/engineering-items/expand-search" + ", searchStr=" + searchStr);
 
 		return expandService.expandEngineeringItemsBySearch(searchStr);
 	}

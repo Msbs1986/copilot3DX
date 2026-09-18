@@ -152,10 +152,6 @@ public class EngineeringItemExpandService {
 
 		expandBody.put("expandDepth", Long.valueOf(-1));
 
-		/*
-		 * Obligatoire pour essayer de récupérer les chemins permettant de reconstruire
-		 * les niveaux de l'EBOM.
-		 */
 		expandBody.put("withPath", Boolean.TRUE);
 
 		JSONArray businessObjectTypes = new JSONArray();
@@ -225,38 +221,41 @@ public class EngineeringItemExpandService {
 
 		Map<String, JSONObject> relationships = new LinkedHashMap<>();
 
-		Map<String, String> businessObjectIdByCestamp = new HashMap<>();
-
 		Map<String, List<String>> childrenByParent = new LinkedHashMap<>();
 
-		JSONArray unresolvedRelationships = new JSONArray();
+		JSONArray unresolvedPaths = new JSONArray();
 
 		if (members != null) {
 
-			collectBusinessObjects(members, businessObjects, businessObjectIdByCestamp);
+			collectBusinessObjects(members, businessObjects);
 
 			collectRelationships(members, relationships);
 
-			buildHierarchyRelations(members, rootPhysicalId, businessObjects, businessObjectIdByCestamp,
-					childrenByParent, unresolvedRelationships);
+			buildRelationsFromPaths(members, rootPhysicalId, businessObjects, childrenByParent, unresolvedPaths);
 		}
 
+		/*
+		 * La réponse d'expand doit normalement contenir l'objet racine.
+		 *
+		 * Cette sécurité permet cependant de reprendre les informations retournées par
+		 * le search.
+		 */
 		JSONObject root = buildHierarchyNode(rootPhysicalId, "", businessObjects, childrenByParent, new HashSet<>(), 0);
 
 		JSONArray flatItems = new JSONArray();
 
-		buildFlatHierarchy(root, flatItems);
+		buildFlatHierarchy(root, flatItems, "");
 
 		JSONArray flatRelationships = new JSONArray();
 
 		for (JSONObject relationship : relationships.values()) {
 
-			flatRelationships.add(simplifyRelationship(relationship, businessObjectIdByCestamp));
+			flatRelationships.add(simplifyRelationship(relationship));
 		}
 
 		JSONObject response = new JSONObject();
 
-		response.put("success", true);
+		response.put("success", Boolean.TRUE);
 
 		response.put("source", "3DEXPERIENCE_ENGINEERING_EXPAND");
 
@@ -266,11 +265,15 @@ public class EngineeringItemExpandService {
 
 		response.put("rootPhysicalId", rootPhysicalId);
 
-		response.put("totalBusinessObjects", businessObjects.size());
+		response.put("totalBusinessObjects", Long.valueOf(businessObjects.size()));
 
-		response.put("totalRelationships", relationships.size());
+		response.put("totalRelationships", Long.valueOf(relationships.size()));
 
-		response.put("totalStructureItems", flatItems.size());
+		response.put("totalStructureItems", Long.valueOf(flatItems.size()));
+
+		response.put("totalPaths", countPaths(members));
+
+		response.put("maximumLevel", findMaximumLevel(flatItems));
 
 		response.put("root", root);
 
@@ -278,23 +281,21 @@ public class EngineeringItemExpandService {
 
 		response.put("relationships", flatRelationships);
 
-		response.put("unresolvedRelationships", unresolvedRelationships);
+		response.put("unresolvedPaths", unresolvedPaths);
 
-		boolean structureReliable = unresolvedRelationships.isEmpty();
+		boolean structureReliable = unresolvedPaths.isEmpty();
 
 		response.put("structureReliable", structureReliable);
 
 		if (!structureReliable) {
 
-			response.put("warning", "Some relationships do not contain sufficient "
-					+ "parent or path information to determine " + "their exact level in the EBOM.");
+			response.put("warning", "Some Path entries could not be resolved completely.");
 		}
 
 		return response;
 	}
 
-	private void collectBusinessObjects(JSONArray members, Map<String, JSONObject> businessObjects,
-			Map<String, String> businessObjectIdByCestamp) {
+	private void collectBusinessObjects(JSONArray members, Map<String, JSONObject> businessObjects) {
 
 		for (Object memberObject : members) {
 
@@ -310,20 +311,13 @@ public class EngineeringItemExpandService {
 				continue;
 			}
 
-			String id = getFirstString(member, "physicalId", "physicalid", "id");
+			String physicalId = getFirstString(member, "physicalId", "physicalid", "id");
 
-			if (id.isBlank()) {
+			if (physicalId.isBlank()) {
 				continue;
 			}
 
-			businessObjects.putIfAbsent(id, member);
-
-			String cestamp = getFirstString(member, "cestamp");
-
-			if (!cestamp.isBlank()) {
-
-				businessObjectIdByCestamp.putIfAbsent(cestamp, id);
-			}
+			businessObjects.putIfAbsent(physicalId, member);
 		}
 	}
 
@@ -343,25 +337,21 @@ public class EngineeringItemExpandService {
 				continue;
 			}
 
-			String id = getFirstString(member, "physicalId", "physicalid", "id");
+			String physicalId = getFirstString(member, "physicalId", "physicalid", "id");
 
-			if (!id.isBlank()) {
-
-				relationships.putIfAbsent(id, member);
+			if (physicalId.isBlank()) {
+				continue;
 			}
+
+			relationships.putIfAbsent(physicalId, member);
 		}
 	}
 
 	@SuppressWarnings("unchecked")
-	private void buildHierarchyRelations(JSONArray members, String rootPhysicalId,
-			Map<String, JSONObject> businessObjects, Map<String, String> businessObjectIdByCestamp,
-			Map<String, List<String>> childrenByParent, JSONArray unresolvedRelationships) {
+	private void buildRelationsFromPaths(JSONArray members, String rootPhysicalId,
+			Map<String, JSONObject> businessObjects, Map<String, List<String>> childrenByParent,
+			JSONArray unresolvedPaths) {
 
-		/*
-		 * Première tentative : lecture des objets contenant directement un path.
-		 * Certaines versions 3DEXPERIENCE retournent des membres dédiés au chemin sans
-		 * type métier classique.
-		 */
 		for (Object memberObject : members) {
 
 			if (!(memberObject instanceof JSONObject)) {
@@ -370,152 +360,60 @@ public class EngineeringItemExpandService {
 
 			JSONObject member = (JSONObject) memberObject;
 
-			buildRelationsFromPathObject(member, rootPhysicalId, businessObjects, businessObjectIdByCestamp,
-					childrenByParent);
-		}
+			/*
+			 * La réponse 3DEXPERIENCE utilise "Path" avec une majuscule.
+			 *
+			 * "path" est également accepté pour assurer la compatibilité avec d'autres
+			 * versions.
+			 */
+			Object pathObject = getFirstObject(member, "Path", "path");
 
-		/*
-		 * Deuxième tentative : lecture des VPMInstance et VPMRepInstance.
-		 */
-		for (Object memberObject : members) {
-
-			if (!(memberObject instanceof JSONObject)) {
+			if (pathObject == null) {
 				continue;
 			}
 
-			JSONObject relationship = (JSONObject) memberObject;
+			List<String> completePath = extractCompletePath(pathObject);
 
-			String relationshipType = getFirstString(relationship, "type");
+			if (completePath.isEmpty()) {
 
-			if (!isSupportedRelationship(relationshipType)) {
-
-				continue;
-			}
-
-			String childBusinessObjectId = resolveChildBusinessObjectId(relationship, businessObjectIdByCestamp);
-
-			if (childBusinessObjectId.isBlank()) {
-
-				unresolvedRelationships.add(
-						createUnresolvedRelationship(relationship, "", "Unable to resolve the child Business Object."));
-
-				continue;
-			}
-
-			String parentBusinessObjectId = resolveParentBusinessObjectId(relationship);
-
-			if (!parentBusinessObjectId.isBlank()) {
-
-				addChildRelation(childrenByParent, parentBusinessObjectId, childBusinessObjectId);
-
-				continue;
-			}
-
-			List<String> pathIds = extractBusinessObjectPath(relationship.get("path"), businessObjects,
-					businessObjectIdByCestamp);
-
-			if (!pathIds.isEmpty()) {
-
-				completeAndAddPath(pathIds, rootPhysicalId, childBusinessObjectId, childrenByParent);
+				unresolvedPaths.add(createUnresolvedPath(pathObject, "The Path is empty or invalid."));
 
 				continue;
 			}
 
 			/*
-			 * Si une autre entrée path a déjà créé la relation, l'occurrence est considérée
-			 * comme résolue.
+			 * Le chemin 3DEXPERIENCE contient une alternance :
+			 *
+			 * Business Object Relationship Business Object Relationship Business Object
+			 *
+			 * On conserve uniquement les IDs présents dans businessObjects. Les VPMInstance
+			 * et VPMRepInstance sont donc automatiquement ignorés.
 			 */
-			if (isChildAlreadyLinked(childrenByParent, childBusinessObjectId)) {
+			List<String> businessObjectPath = filterBusinessObjectsFromPath(completePath, businessObjects);
+
+			if (businessObjectPath.isEmpty()) {
+
+				unresolvedPaths
+						.add(createUnresolvedPath(pathObject, "No supported Business Object was found in the Path."));
 
 				continue;
 			}
 
-			unresolvedRelationships.add(createUnresolvedRelationship(relationship, childBusinessObjectId,
-					"No parent or path information was returned."));
+			if (!rootPhysicalId.equals(businessObjectPath.get(0))) {
+
+				businessObjectPath.add(0, rootPhysicalId);
+			}
+
+			addPathRelations(businessObjectPath, childrenByParent);
 		}
 	}
 
-	private void buildRelationsFromPathObject(JSONObject member, String rootPhysicalId,
-			Map<String, JSONObject> businessObjects, Map<String, String> businessObjectIdByCestamp,
-			Map<String, List<String>> childrenByParent) {
+	private List<String> extractCompletePath(Object pathObject) {
 
-		String parentId = resolveParentBusinessObjectId(member);
-
-		String childId = resolveChildBusinessObjectId(member, businessObjectIdByCestamp);
-
-		if (!parentId.isBlank() && !childId.isBlank()) {
-
-			addChildRelation(childrenByParent, parentId, childId);
-		}
-
-		List<String> pathIds = extractBusinessObjectPath(member.get("path"), businessObjects,
-				businessObjectIdByCestamp);
-
-		if (pathIds.isEmpty()) {
-			return;
-		}
-
-		if (!rootPhysicalId.equals(pathIds.get(0))) {
-
-			pathIds.add(0, rootPhysicalId);
-		}
-
-		if (!childId.isBlank() && !pathIds.contains(childId)) {
-
-			pathIds.add(childId);
-		}
-
-		addPathRelations(pathIds, childrenByParent);
-	}
-
-	private String resolveParentBusinessObjectId(JSONObject relationship) {
-
-		return getFirstString(relationship, "parent", "parentId", "parentPhysicalId", "parentReference",
-				"parentReferenceId", "parentphysicalid");
-	}
-
-	private String resolveChildBusinessObjectId(JSONObject relationship,
-			Map<String, String> businessObjectIdByCestamp) {
-
-		String referenceId = getFirstString(relationship, "reference", "referenceId", "referencePhysicalId", "child",
-				"childId", "childPhysicalId", "childReference", "childReferenceId");
-
-		if (!referenceId.isBlank()) {
-			return referenceId;
-		}
-
-		String cestamp = getFirstString(relationship, "cestamp");
-
-		if (cestamp.isBlank()) {
-			return "";
-		}
-
-		return businessObjectIdByCestamp.getOrDefault(cestamp, "");
-	}
-
-	private void completeAndAddPath(List<String> pathIds, String rootPhysicalId, String childBusinessObjectId,
-			Map<String, List<String>> childrenByParent) {
-
-		if (!rootPhysicalId.equals(pathIds.get(0))) {
-
-			pathIds.add(0, rootPhysicalId);
-		}
-
-		if (!pathIds.contains(childBusinessObjectId)) {
-
-			pathIds.add(childBusinessObjectId);
-		}
-
-		addPathRelations(pathIds, childrenByParent);
-	}
-
-	private List<String> extractBusinessObjectPath(Object pathObject, Map<String, JSONObject> businessObjects,
-			Map<String, String> businessObjectIdByCestamp) {
-
-		List<String> pathIds = new ArrayList<>();
+		List<String> completePath = new ArrayList<>();
 
 		if (pathObject == null) {
-			return pathIds;
+			return completePath;
 		}
 
 		if (pathObject instanceof JSONArray) {
@@ -524,30 +422,34 @@ public class EngineeringItemExpandService {
 
 			for (Object pathElement : pathArray) {
 
-				String resolvedId = resolvePathElement(pathElement, businessObjects, businessObjectIdByCestamp);
+				String physicalId = extractPhysicalIdFromPathElement(pathElement);
 
-				addUniquePathId(pathIds, resolvedId);
+				if (!physicalId.isBlank()) {
+					completePath.add(physicalId);
+				}
 			}
 
-			return pathIds;
+			return completePath;
 		}
 
 		if (pathObject instanceof JSONObject) {
 
 			JSONObject pathJson = (JSONObject) pathObject;
 
-			Object membersObject = getFirstObject(pathJson, "member", "members", "items", "path");
+			Object nestedPath = getFirstObject(pathJson, "Path", "path", "member", "members", "items");
 
-			if (membersObject != null && membersObject != pathObject) {
+			if (nestedPath != null && nestedPath != pathObject) {
 
-				return extractBusinessObjectPath(membersObject, businessObjects, businessObjectIdByCestamp);
+				return extractCompletePath(nestedPath);
 			}
 
-			String resolvedId = resolvePathElement(pathJson, businessObjects, businessObjectIdByCestamp);
+			String physicalId = extractPhysicalIdFromPathElement(pathJson);
 
-			addUniquePathId(pathIds, resolvedId);
+			if (!physicalId.isBlank()) {
+				completePath.add(physicalId);
+			}
 
-			return pathIds;
+			return completePath;
 		}
 
 		if (pathObject instanceof String) {
@@ -555,7 +457,7 @@ public class EngineeringItemExpandService {
 			String pathString = pathObject.toString().trim();
 
 			if (pathString.isBlank()) {
-				return pathIds;
+				return completePath;
 			}
 
 			String normalizedPath = pathString.replace("[", "").replace("]", "").replace("\"", "");
@@ -564,20 +466,18 @@ public class EngineeringItemExpandService {
 
 			for (String pathPart : pathParts) {
 
-				String candidate = pathPart.trim();
+				String physicalId = pathPart.trim();
 
-				if (businessObjects.containsKey(candidate)) {
-
-					addUniquePathId(pathIds, candidate);
+				if (!physicalId.isBlank()) {
+					completePath.add(physicalId);
 				}
 			}
 		}
 
-		return pathIds;
+		return completePath;
 	}
 
-	private String resolvePathElement(Object pathElement, Map<String, JSONObject> businessObjects,
-			Map<String, String> businessObjectIdByCestamp) {
+	private String extractPhysicalIdFromPathElement(Object pathElement) {
 
 		if (pathElement == null) {
 			return "";
@@ -585,14 +485,7 @@ public class EngineeringItemExpandService {
 
 		if (pathElement instanceof String) {
 
-			String candidate = pathElement.toString().trim();
-
-			if (businessObjects.containsKey(candidate)) {
-
-				return candidate;
-			}
-
-			return "";
+			return pathElement.toString().trim();
 		}
 
 		if (!(pathElement instanceof JSONObject)) {
@@ -601,108 +494,81 @@ public class EngineeringItemExpandService {
 
 		JSONObject pathJson = (JSONObject) pathElement;
 
-		String id = getFirstString(pathJson, "physicalId", "physicalid", "id", "reference", "referenceId", "child",
-				"childId");
-
-		if (businessObjects.containsKey(id)) {
-			return id;
-		}
-
-		String cestamp = getFirstString(pathJson, "cestamp");
-
-		if (cestamp.isBlank()) {
-			return "";
-		}
-
-		return businessObjectIdByCestamp.getOrDefault(cestamp, "");
+		return getFirstString(pathJson, "physicalId", "physicalid", "id");
 	}
 
-	private Object getFirstObject(JSONObject json, String... keys) {
+	private List<String> filterBusinessObjectsFromPath(List<String> completePath,
+			Map<String, JSONObject> businessObjects) {
 
-		if (json == null || keys == null) {
-			return null;
-		}
+		List<String> businessObjectPath = new ArrayList<>();
 
-		for (String key : keys) {
+		for (String physicalId : completePath) {
 
-			Object value = json.get(key);
+			if (!businessObjects.containsKey(physicalId)) {
+				continue;
+			}
 
-			if (value != null) {
-				return value;
+			/*
+			 * On évite seulement les doublons consécutifs.
+			 *
+			 * Le même Business Object peut être présent plusieurs fois dans une structure à
+			 * travers des occurrences différentes.
+			 */
+			if (businessObjectPath.isEmpty()
+					|| !physicalId.equals(businessObjectPath.get(businessObjectPath.size() - 1))) {
+
+				businessObjectPath.add(physicalId);
 			}
 		}
 
-		return null;
+		return businessObjectPath;
 	}
 
-	private void addUniquePathId(List<String> pathIds, String physicalId) {
+	private void addPathRelations(List<String> businessObjectPath, Map<String, List<String>> childrenByParent) {
 
-		if (physicalId == null || physicalId.isBlank()) {
+		if (businessObjectPath == null || businessObjectPath.size() < 2) {
 
 			return;
 		}
 
-		if (!pathIds.contains(physicalId)) {
-			pathIds.add(physicalId);
+		for (int index = 0; index < businessObjectPath.size() - 1; index++) {
+
+			String parentPhysicalId = businessObjectPath.get(index);
+
+			String childPhysicalId = businessObjectPath.get(index + 1);
+
+			addChildRelation(childrenByParent, parentPhysicalId, childPhysicalId);
 		}
 	}
 
-	private void addPathRelations(List<String> pathIds, Map<String, List<String>> childrenByParent) {
+	private void addChildRelation(Map<String, List<String>> childrenByParent, String parentPhysicalId,
+			String childPhysicalId) {
 
-		if (pathIds == null || pathIds.size() < 2) {
+		if (parentPhysicalId == null || parentPhysicalId.isBlank() || childPhysicalId == null
+				|| childPhysicalId.isBlank() || parentPhysicalId.equals(childPhysicalId)) {
 
 			return;
 		}
 
-		for (int index = 0; index < pathIds.size() - 1; index++) {
+		List<String> children = childrenByParent.computeIfAbsent(parentPhysicalId, key -> new ArrayList<>());
 
-			String parentId = pathIds.get(index);
-
-			String childId = pathIds.get(index + 1);
-
-			addChildRelation(childrenByParent, parentId, childId);
+		if (!children.contains(childPhysicalId)) {
+			children.add(childPhysicalId);
 		}
-	}
-
-	private void addChildRelation(Map<String, List<String>> childrenByParent, String parentId, String childId) {
-
-		if (parentId == null || parentId.isBlank() || childId == null || childId.isBlank()
-				|| parentId.equals(childId)) {
-
-			return;
-		}
-
-		List<String> children = childrenByParent.computeIfAbsent(parentId, key -> new ArrayList<>());
-
-		if (!children.contains(childId)) {
-			children.add(childId);
-		}
-	}
-
-	private boolean isChildAlreadyLinked(Map<String, List<String>> childrenByParent, String childId) {
-
-		for (List<String> children : childrenByParent.values()) {
-
-			if (children.contains(childId)) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	@SuppressWarnings("unchecked")
 	private JSONObject buildHierarchyNode(String physicalId, String parentPhysicalId,
-			Map<String, JSONObject> businessObjects, Map<String, List<String>> childrenByParent, Set<String> visited,
-			int level) {
+			Map<String, JSONObject> businessObjects, Map<String, List<String>> childrenByParent,
+			Set<String> branchVisited, int level) {
 
-		JSONObject sourceItem = businessObjects.get(physicalId);
+		JSONObject sourceObject = businessObjects.get(physicalId);
 
 		JSONObject node;
 
-		if (sourceItem != null) {
+		if (sourceObject != null) {
 
-			node = simplifyBusinessObject(sourceItem);
+			node = simplifyBusinessObject(sourceObject);
 
 		} else {
 
@@ -715,24 +581,32 @@ public class EngineeringItemExpandService {
 			node.put("type", "");
 			node.put("revision", "");
 			node.put("state", "");
+			node.put("owner", "");
+			node.put("organization", "");
+			node.put("collabSpace", "");
+			node.put("created", "");
+			node.put("modified", "");
+			node.put("cestamp", "");
 		}
 
 		node.put("parentPhysicalId", parentPhysicalId);
 
-		node.put("level", level);
+		node.put("level", Long.valueOf(level));
 
 		JSONArray children = new JSONArray();
 
-		if (visited.contains(physicalId)) {
+		if (branchVisited.contains(physicalId)) {
 
-			node.put("cycleDetected", true);
+			node.put("cycleDetected", Boolean.TRUE);
 
 			node.put("children", children);
+
+			node.put("childrenCount", Long.valueOf(0));
 
 			return node;
 		}
 
-		visited.add(physicalId);
+		branchVisited.add(physicalId);
 
 		List<String> childIds = childrenByParent.get(physicalId);
 
@@ -740,10 +614,10 @@ public class EngineeringItemExpandService {
 
 			for (String childId : childIds) {
 
-				Set<String> branchVisited = new HashSet<>(visited);
+				Set<String> childBranchVisited = new HashSet<>(branchVisited);
 
 				JSONObject childNode = buildHierarchyNode(childId, physicalId, businessObjects, childrenByParent,
-						branchVisited, level + 1);
+						childBranchVisited, level + 1);
 
 				children.add(childNode);
 			}
@@ -751,17 +625,32 @@ public class EngineeringItemExpandService {
 
 		node.put("children", children);
 
-		node.put("childrenCount", children.size());
+		node.put("childrenCount", Long.valueOf(children.size()));
 
 		return node;
 	}
 
 	@SuppressWarnings("unchecked")
-	private void buildFlatHierarchy(JSONObject node, JSONArray flatItems) {
+	private void buildFlatHierarchy(JSONObject node, JSONArray flatItems, String parentDisplayPath) {
 
 		if (node == null) {
 			return;
 		}
+
+		String title = getFirstString(node, "title", "name", "physicalId");
+
+		String displayPath;
+
+		if (parentDisplayPath == null || parentDisplayPath.isBlank()) {
+
+			displayPath = title;
+
+		} else {
+
+			displayPath = parentDisplayPath + " > " + title;
+		}
+
+		long level = getLongValue(node.get("level"), 0L);
 
 		JSONObject flatItem = new JSONObject();
 
@@ -771,7 +660,7 @@ public class EngineeringItemExpandService {
 
 		flatItem.put("name", getFirstString(node, "name"));
 
-		flatItem.put("title", getFirstString(node, "title"));
+		flatItem.put("title", title);
 
 		flatItem.put("type", getFirstString(node, "type"));
 
@@ -785,9 +674,15 @@ public class EngineeringItemExpandService {
 
 		flatItem.put("collabSpace", getFirstString(node, "collabSpace"));
 
-		flatItem.put("level", node.getOrDefault("level", Long.valueOf(0)));
+		flatItem.put("level", Long.valueOf(level));
 
-		flatItem.put("childrenCount", node.getOrDefault("childrenCount", Long.valueOf(0)));
+		flatItem.put("levelLabel", "Level " + level);
+
+		flatItem.put("childrenCount", Long.valueOf(getLongValue(node.get("childrenCount"), 0L)));
+
+		flatItem.put("displayPath", displayPath);
+
+		flatItem.put("displayLabel", createIndentedLabel(title, level));
 
 		flatItems.add(flatItem);
 
@@ -803,9 +698,27 @@ public class EngineeringItemExpandService {
 
 			if (childObject instanceof JSONObject) {
 
-				buildFlatHierarchy((JSONObject) childObject, flatItems);
+				buildFlatHierarchy((JSONObject) childObject, flatItems, displayPath);
 			}
 		}
+	}
+
+	private String createIndentedLabel(String title, long level) {
+
+		StringBuilder label = new StringBuilder();
+
+		for (long index = 0; index < level; index++) {
+
+			label.append("  ");
+		}
+
+		if (level > 0) {
+			label.append("|- ");
+		}
+
+		label.append(title);
+
+		return label.toString();
 	}
 
 	@SuppressWarnings("unchecked")
@@ -841,7 +754,7 @@ public class EngineeringItemExpandService {
 	}
 
 	@SuppressWarnings("unchecked")
-	private JSONObject simplifyRelationship(JSONObject source, Map<String, String> businessObjectIdByCestamp) {
+	private JSONObject simplifyRelationship(JSONObject source) {
 
 		JSONObject relationship = new JSONObject();
 
@@ -850,11 +763,6 @@ public class EngineeringItemExpandService {
 		relationship.put("name", getFirstString(source, "name"));
 
 		relationship.put("type", getFirstString(source, "type"));
-
-		relationship.put("parentBusinessObjectPhysicalId", resolveParentBusinessObjectId(source));
-
-		relationship.put("childBusinessObjectPhysicalId",
-				resolveChildBusinessObjectId(source, businessObjectIdByCestamp));
 
 		relationship.put("cestamp", getFirstString(source, "cestamp"));
 
@@ -866,24 +774,88 @@ public class EngineeringItemExpandService {
 	}
 
 	@SuppressWarnings("unchecked")
-	private JSONObject createUnresolvedRelationship(JSONObject relationship, String resolvedChildPhysicalId,
-			String reason) {
+	private JSONObject createUnresolvedPath(Object pathObject, String reason) {
 
 		JSONObject unresolved = new JSONObject();
 
-		unresolved.put("physicalId", getFirstString(relationship, "physicalId", "physicalid", "id"));
-
-		unresolved.put("name", getFirstString(relationship, "name"));
-
-		unresolved.put("type", getFirstString(relationship, "type"));
-
-		unresolved.put("cestamp", getFirstString(relationship, "cestamp"));
-
-		unresolved.put("resolvedChildPhysicalId", resolvedChildPhysicalId);
+		unresolved.put("path", pathObject);
 
 		unresolved.put("reason", reason);
 
 		return unresolved;
+	}
+
+	private long countPaths(JSONArray members) {
+
+		if (members == null) {
+			return 0L;
+		}
+
+		long totalPaths = 0L;
+
+		for (Object memberObject : members) {
+
+			if (!(memberObject instanceof JSONObject)) {
+				continue;
+			}
+
+			JSONObject member = (JSONObject) memberObject;
+
+			Object pathObject = getFirstObject(member, "Path", "path");
+
+			if (pathObject != null) {
+				totalPaths++;
+			}
+		}
+
+		return totalPaths;
+	}
+
+	private long findMaximumLevel(JSONArray flatItems) {
+
+		long maximumLevel = 0L;
+
+		if (flatItems == null) {
+			return maximumLevel;
+		}
+
+		for (Object itemObject : flatItems) {
+
+			if (!(itemObject instanceof JSONObject)) {
+				continue;
+			}
+
+			JSONObject item = (JSONObject) itemObject;
+
+			long level = getLongValue(item.get("level"), 0L);
+
+			if (level > maximumLevel) {
+				maximumLevel = level;
+			}
+		}
+
+		return maximumLevel;
+	}
+
+	private long getLongValue(Object value, long defaultValue) {
+
+		if (value == null) {
+			return defaultValue;
+		}
+
+		if (value instanceof Number) {
+
+			return ((Number) value).longValue();
+		}
+
+		try {
+
+			return Long.parseLong(value.toString());
+
+		} catch (NumberFormatException exception) {
+
+			return defaultValue;
+		}
 	}
 
 	private boolean isSupportedBusinessObject(String type) {
@@ -911,6 +883,24 @@ public class EngineeringItemExpandService {
 
 			if (value instanceof JSONArray) {
 				return (JSONArray) value;
+			}
+		}
+
+		return null;
+	}
+
+	private Object getFirstObject(JSONObject json, String... keys) {
+
+		if (json == null || keys == null) {
+			return null;
+		}
+
+		for (String key : keys) {
+
+			Object value = json.get(key);
+
+			if (value != null) {
+				return value;
 			}
 		}
 

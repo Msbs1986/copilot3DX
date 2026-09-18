@@ -21,29 +21,37 @@ public class EngineeringItemExpandMcpTools {
 			Expand the complete engineering structure
 			of an Engineering Item in 3DEXPERIENCE.
 
-			Use this tool when the user asks for an EBOM,
-			Engineering BOM, engineering structure,
-			product structure, design structure,
-			assembly hierarchy, components, subassemblies,
-			children or drawings attached to the structure.
+			Use this tool when the user asks for:
+			- an EBOM;
+			- an Engineering BOM;
+			- an engineering structure;
+			- a product structure;
+			- a design structure;
+			- an assembly hierarchy;
+			- the children of an Engineering Item;
+			- all components and their levels;
+			- drawings included in the structure.
 
 			The tool searches the root Engineering Item
-			before expanding its complete structure.
+			and then expands the complete structure.
 
 			The result contains:
-			- the EBOM as a hierarchical root structure;
+			- a hierarchical EBOM in the root property;
 			- all children grouped under their parents;
-			- the level of every Engineering Item;
+			- the level of every object;
+			- VPMReference objects;
 			- Drawing objects;
-			- VPMInstance and VPMRepInstance relationships;
-			- a flat list of all objects with their levels.
+			- VPMInstance relationships;
+			- VPMRepInstance relationships;
+			- a flat list of all objects and levels;
+			- the complete display path of each object.
 
 			Use this tool for requests such as:
 			- Show me the EBOM of an Engineering Item.
 			- Expand the Engineering Item structure.
 			- Display the product structure.
 			- Show all children and their levels.
-			- Show the drawings in the engineering structure.
+			- Show all drawings in the engineering structure.
 
 			Do not use this tool for a simple Engineering
 			Item search.
@@ -57,9 +65,11 @@ public class EngineeringItemExpandMcpTools {
 					Search criterion identifying the root
 					Engineering Item.
 
-					The value can be a physicalId, name,
-					title or valid 3DEXPERIENCE search
-					expression.
+					The value can be:
+					- a physicalId;
+					- a name;
+					- a title;
+					- a valid 3DEXPERIENCE search expression.
 
 					Examples:
 					- Physical Product00350754

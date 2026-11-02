@@ -1,8 +1,6 @@
 package com.keonys.copilot3DX.service;
 
-import java.net.URLEncoder;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -18,11 +16,12 @@ import org.springframework.stereotype.Service;
 import com.keonys.copilot3DX.config.HttpRequestService;
 import com.keonys.copilot3DX.dto.ChangeActionDto;
 import com.keonys.copilot3DX.model.ChangeActionInfo;
+import com.keonys.copilot3DX.model.RealizedChangeInfo;
 
 @Service
 public class ChangeActionService {
 
-	private static final String CHANGE_ACTION_ENDPOINT = "/resources/v1/modeler/dslc/changeaction/search";
+	private static final String CHANGE_ACTION_ENDPOINT = "/resources/v1/modeler/dslc/changeaction/";
 
 	@Value("${threedx.space-url}")
 	private String space3dsUrlStr;
@@ -39,116 +38,222 @@ public class ChangeActionService {
 		this.httpRequestService = httpRequestService;
 	}
 
-	public ChangeActionDto searchChangeActions(String searchStr) throws Exception {
+	/**
+	 * Get a Change Action and its realized changes from 3DEXPERIENCE.
+	 *
+	 * Example:
+	 *
+	 * /resources/v1/modeler/dslc/changeaction/{changeActionId}
+	 * ?$fields=realizedChanges
+	 *
+	 */
+	public ChangeActionDto getChangeAction(String changeActionId) throws Exception {
 
+		if (changeActionId == null || changeActionId.isBlank()) {
+			throw new IllegalArgumentException("Change Action ID must not be null or empty.");
+		}
+
+		String effectiveChangeActionId = changeActionId.trim();
+
+		/*
+		 * Prepare 3DEXPERIENCE authentication.
+		 */
 		service3DXConnexion.prepareAuthorizationHeaderValue();
 
-		// Conservé si cette méthode initialise ou rafraîchit le CSRF.
+		/*
+		 * Kept because the existing POC may use this call to initialize or refresh
+		 * authentication/CSRF information.
+		 */
 		service3DXConnexion.getCsrfTokenValueBasic();
 
 		Map<String, String> headers = createSecurityHeaders();
 
-		String effectiveSearchStr = searchStr == null || searchStr.isBlank() ? "*" : searchStr.trim();
+		/*
+		 * Build the Change Action URL.
+		 */
+		String url = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + effectiveChangeActionId + "?$fields=realizedChanges";
 
-		String encodedSearchStr = URLEncoder.encode(effectiveSearchStr, StandardCharsets.UTF_8);
+		/*
+		 * Call 3DEXPERIENCE.
+		 */
+		HttpResponse<String> response = httpRequestService.loadUrl("GET", "", "", url, headers);
 
-		String searchUrl = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + "?$searchStr=" + encodedSearchStr + "&$top=50";
+		/*
+		 * Check HTTP response.
+		 */
+		if (response.statusCode() != 200) {
 
-		HttpResponse<String> searchResponse = httpRequestService.loadUrl("GET", "", "", searchUrl, headers);
-
-		if (searchResponse.statusCode() != 200) {
-			throw new RuntimeException("3DEXPERIENCE Change Action search failed. Status=" + searchResponse.statusCode()
-					+ " Response=" + searchResponse.body());
+			throw new RuntimeException("3DEXPERIENCE Change Action retrieval failed. " + "Status="
+					+ response.statusCode() + " Response=" + response.body());
 		}
 
-		List<ChangeActionInfo> result = extractChangeActions(searchResponse.body(), headers);
+		/*
+		 * Parse the Change Action.
+		 */
+		ChangeActionInfo changeActionInfo = extractChangeAction(response.body());
 
-		return new ChangeActionDto(true, 200, effectiveSearchStr, result);
+		/*
+		 * Build Copilot response.
+		 */
+		List<ChangeActionInfo> result = new ArrayList<>();
+		result.add(changeActionInfo);
+
+		return new ChangeActionDto(true, response.statusCode(), effectiveChangeActionId, result);
 	}
 
-	private List<ChangeActionInfo> extractChangeActions(String responseBody, Map<String, String> headers)
-			throws Exception {
+	/**
+	 * Extract Change Action information from the 3DEXPERIENCE JSON response.
+	 */
+	private ChangeActionInfo extractChangeAction(String responseBody) throws Exception {
 
 		JSONParser parser = new JSONParser();
 
-		JSONObject searchJson = (JSONObject) parser.parse(responseBody);
+		JSONObject json = (JSONObject) parser.parse(responseBody);
 
-		JSONArray changeActions = (JSONArray) searchJson.get("changeAction");
+		ChangeActionInfo info = new ChangeActionInfo();
 
-		List<ChangeActionInfo> result = new ArrayList<>();
+		/*
+		 * Change Action standard attributes.
+		 */
+		info.setId(getString(json, "id"));
 
-		if (changeActions == null) {
+		info.setName(getString(json, "name"));
+
+		info.setTitle(getString(json, "title"));
+
+		info.setState(getString(json, "state"));
+
+		info.setOwner(getString(json, "owner"));
+
+		info.setOriginator(getString(json, "originator"));
+
+		info.setSeverity(getString(json, "severity"));
+
+		info.setCollabSpace(getString(json, "collabSpace"));
+
+		info.setDescription(getString(json, "description"));
+
+		info.setCreationDate(getString(json, "Creation Date"));
+
+		info.setModificationDate(getString(json, "Last Modification Date"));
+
+		/*
+		 * Realized Changes.
+		 */
+		List<RealizedChangeInfo> realizedChanges = extractRealizedChanges(json);
+
+		info.setRealizedChanges(realizedChanges);
+
+		return info;
+	}
+
+	/**
+	 * Extract the realizedChanges array returned by 3DEXPERIENCE.
+	 */
+	private List<RealizedChangeInfo> extractRealizedChanges(JSONObject json) {
+
+		List<RealizedChangeInfo> result = new ArrayList<>();
+
+		JSONArray realizedChanges = (JSONArray) json.get("realizedChanges");
+
+		/*
+		 * No realized change.
+		 */
+		if (realizedChanges == null) {
 			return result;
 		}
 
-		for (Object object : changeActions) {
+		/*
+		 * Process each realized change.
+		 */
+		for (Object object : realizedChanges) {
 
-			JSONObject changeAction = (JSONObject) object;
-
-			String relativePath = getString(changeAction, "relativePath");
-
-			if (relativePath.isBlank()) {
+			if (!(object instanceof JSONObject)) {
 				continue;
 			}
 
-			try {
-				ChangeActionInfo info = loadChangeActionDetails(relativePath, headers, parser);
+			JSONObject realizedChangeJson = (JSONObject) object;
 
-				if (info != null) {
-					result.add(info);
-				}
+			/*
+			 * The "where" object contains the impacted object information.
+			 */
+			JSONObject whereJson = (JSONObject) realizedChangeJson.get("where");
 
-			} catch (Exception exception) {
-				System.err.println("Error while processing " + relativePath + ": " + exception.getMessage());
+			if (whereJson == null) {
+				continue;
 			}
+
+			RealizedChangeInfo realizedChange = new RealizedChangeInfo();
+
+			/*
+			 * Object identifier.
+			 */
+			realizedChange.setIdentifier(getString(whereJson, "identifier"));
+
+			/*
+			 * Relative 3DEXPERIENCE REST path.
+			 */
+			realizedChange.setRelativePath(getString(whereJson, "relativePath"));
+
+			/*
+			 * Object source.
+			 */
+			realizedChange.setSource(getString(whereJson, "source"));
+
+			/*
+			 * Relation / realized change type.
+			 *
+			 * Examples: - CreateAssembly - Provide - ProcessContinuousProvide
+			 */
+			realizedChange.setType(getString(whereJson, "type"));
+
+			/*
+			 * Operations.
+			 *
+			 * Examples: - Create - Add
+			 */
+			JSONArray operationsJson = (JSONArray) realizedChangeJson.get("operations");
+
+			List<String> operations = new ArrayList<>();
+
+			if (operationsJson != null) {
+
+				for (Object operation : operationsJson) {
+
+					if (operation != null) {
+						operations.add(operation.toString());
+					}
+				}
+			}
+
+			realizedChange.setOperations(operations);
+
+			/*
+			 * Add the realized change to the result.
+			 */
+			result.add(realizedChange);
 		}
 
 		return result;
 	}
 
-	private ChangeActionInfo loadChangeActionDetails(String relativePath, Map<String, String> headers,
-			JSONParser parser) throws Exception {
-
-		String detailUrl = space3dsUrlStr + relativePath;
-
-		HttpResponse<String> detailResponse = httpRequestService.loadUrl("GET", "", "", detailUrl, headers);
-
-		if (detailResponse.statusCode() != 200) {
-			System.err.println("Change Action details failed. Status=" + detailResponse.statusCode() + " RelativePath="
-					+ relativePath);
-
-			return null;
-		}
-
-		JSONObject detailJson = (JSONObject) parser.parse(detailResponse.body());
-
-		ChangeActionInfo info = new ChangeActionInfo();
-
-		info.setId(getString(detailJson, "id"));
-		info.setName(getString(detailJson, "name"));
-		info.setTitle(getString(detailJson, "title"));
-		info.setState(getString(detailJson, "state"));
-		info.setOwner(getString(detailJson, "owner"));
-		info.setOriginator(getString(detailJson, "originator"));
-		info.setSeverity(getString(detailJson, "severity"));
-		info.setCollabSpace(getString(detailJson, "collabSpace"));
-		info.setDescription(getString(detailJson, "description"));
-		info.setCreationDate(getString(detailJson, "Creation Date"));
-		info.setModificationDate(getString(detailJson, "Last Modification Date"));
-
-		return info;
-	}
-
+	/**
+	 * Build required 3DEXPERIENCE security headers.
+	 */
 	private Map<String, String> createSecurityHeaders() {
 
 		Map<String, String> headers = new HashMap<>();
 
 		headers.put("SecurityContext", secContext);
+
 		headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
 
 		return headers;
 	}
 
+	/**
+	 * Safely retrieve a string value from a JSONObject.
+	 */
 	private String getString(JSONObject json, String key) {
 
 		Object value = json.get(key);

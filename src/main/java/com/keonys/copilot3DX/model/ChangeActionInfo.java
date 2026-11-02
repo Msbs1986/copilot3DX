@@ -1,5 +1,7 @@
 package com.keonys.copilot3DX.model;
 
+import java.util.List;
+
 public class ChangeActionInfo {
 
     private String id;
@@ -13,6 +15,8 @@ public class ChangeActionInfo {
     private String description;
     private String creationDate;
     private String modificationDate;
+
+    private List<RealizedChangeInfo> realizedChanges;
 
     public ChangeActionInfo() {
     }
@@ -103,5 +107,13 @@ public class ChangeActionInfo {
 
     public void setModificationDate(String modificationDate) {
         this.modificationDate = modificationDate;
+    }
+
+    public List<RealizedChangeInfo> getRealizedChanges() {
+        return realizedChanges;
+    }
+
+    public void setRealizedChanges(List<RealizedChangeInfo> realizedChanges) {
+        this.realizedChanges = realizedChanges;
     }
 }

@@ -18,24 +18,50 @@ public class MaturityMcpTools {
 	}
 
 	@Tool(name = "changeObjectMaturityState", description = """
-			Change the maturity state of an object in 3DEXPERIENCE.
+			Change the maturity state of a Manufacturing Item or
+			Engineering Item in 3DEXPERIENCE.
 
-			Use this tool when the user wants to promote or change
-			the maturity state of a Manufacturing Item or
-			Engineering Item.
+			IMPORTANT:
+			In this tool, the words Release, Released, Frozen,
+			In Work, Draft and Obsolete refer to 3DEXPERIENCE
+			maturity lifecycle states.
+
+			"Release" means changing the 3DEXPERIENCE maturity
+			state to RELEASED. It does NOT mean escalating,
+			transferring or handing the conversation to a person.
+
+			Use this tool when the user asks to:
+			- change the maturity state of an object
+			- promote an object
+			- release an object
+			- freeze an object
+			- geler un objet
+			- passer un objet à In Work
+			- passer un objet à Release
+			- rendre un objet obsolète
+
+			Examples:
+
+			"Je veux passer cet objet à Release"
+			-> call this tool with nextState = RELEASED
+
+			"Release this Manufacturing Item"
+			-> call this tool with nextState = RELEASED
+
+			"Je veux geler cet objet"
+			-> call this tool with nextState = FROZEN
+
+			"Freeze this Manufacturing Item"
+			-> call this tool with nextState = FROZEN
+
+			"Passe cet objet à In Work"
+			-> call this tool with nextState = IN_WORK
+
+			"Passe cet objet en Draft"
+			-> call this tool with nextState = DRAFT
 
 			The object must be identified by its 3DEXPERIENCE
 			physical ID.
-
-			The target maturity state must be explicitly provided
-			by the user.
-
-			Examples:
-			- Promote Manufacturing Item 57BA... to Frozen
-			- Change Engineering Item 12345 to Released
-			- Set the maturity state of this object to Frozen
-
-			Do not use this tool to search for objects.
 			""")
 	public MaturityDto changeObjectMaturityState(
 

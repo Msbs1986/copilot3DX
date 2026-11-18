@@ -1,6 +1,8 @@
 package com.keonys.copilot3DX.service;
 
+import java.net.URLEncoder;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -21,6 +23,8 @@ import com.keonys.copilot3DX.model.RealizedChangeInfo;
 @Service
 public class ChangeActionService {
 
+	private static final String CHANGE_ACTION_SEARCH_ENDPOINT = "/resources/v1/modeler/dslc/changeaction/search";
+
 	private static final String CHANGE_ACTION_ENDPOINT = "/resources/v1/modeler/dslc/changeaction/";
 
 	@Value("${threedx.space-url}")
@@ -39,70 +43,187 @@ public class ChangeActionService {
 	}
 
 	/**
-	 * Get a Change Action and its realized changes from 3DEXPERIENCE.
+	 * Search Change Actions and retrieve their complete information.
 	 *
-	 * Example:
+	 * Step 1: /resources/v1/modeler/dslc/changeaction/search?searchStr=*
 	 *
-	 * /resources/v1/modeler/dslc/changeaction/{changeActionId}
-	 * ?$fields=realizedChanges
+	 * Step 2: For each returned identifier:
 	 *
+	 * /resources/v1/modeler/dslc/changeaction/{id}?$fields=realizedChanges
+	 */
+	public ChangeActionDto searchChangeActions(String searchStr) throws Exception {
+
+		prepareConnection();
+
+		Map<String, String> headers = createSecurityHeaders();
+
+		/*
+		 * "*" means all Change Actions.
+		 */
+		String effectiveSearchStr = searchStr == null || searchStr.isBlank() ? "*" : searchStr.trim();
+
+		String encodedSearchStr = URLEncoder.encode(effectiveSearchStr, StandardCharsets.UTF_8);
+
+		/*
+		 * Build search URL.
+		 */
+		String searchUrl = normalizeBaseUrl(space3dsUrlStr) + CHANGE_ACTION_SEARCH_ENDPOINT + "?searchStr="
+				+ encodedSearchStr;
+
+		System.out.println("Change Action search URL: " + searchUrl);
+
+		/*
+		 * STEP 1
+		 *
+		 * Search Change Actions.
+		 */
+		HttpResponse<String> searchResponse = httpRequestService.loadUrl("GET", "", "", searchUrl, headers);
+
+		if (searchResponse.statusCode() != 200) {
+
+			throw new RuntimeException("3DEXPERIENCE Change Action search failed. Status=" + searchResponse.statusCode()
+					+ " Response=" + searchResponse.body());
+		}
+
+		/*
+		 * Extract physical IDs returned by the search.
+		 */
+		List<String> changeActionIds = extractChangeActionIds(searchResponse.body());
+
+		System.out.println("Change Actions found: " + changeActionIds.size());
+
+		/*
+		 * STEP 2
+		 *
+		 * Retrieve complete information for every Change Action.
+		 */
+		List<ChangeActionInfo> changeActions = new ArrayList<>();
+
+		for (String changeActionId : changeActionIds) {
+
+			try {
+
+				ChangeActionInfo changeAction = loadChangeAction(changeActionId, headers);
+
+				if (changeAction != null) {
+
+					changeActions.add(changeAction);
+				}
+
+			} catch (Exception e) {
+
+				/*
+				 * One invalid/inaccessible Change Action should not prevent the complete search
+				 * result from being returned.
+				 */
+				System.err.println("Unable to retrieve Change Action " + changeActionId + ": " + e.getMessage());
+			}
+		}
+
+		/*
+		 * Return enriched Change Actions.
+		 */
+		return new ChangeActionDto(true, searchResponse.statusCode(), effectiveSearchStr, changeActions);
+	}
+
+	/**
+	 * Get one Change Action using its physical ID.
 	 */
 	public ChangeActionDto getChangeAction(String changeActionId) throws Exception {
 
 		if (changeActionId == null || changeActionId.isBlank()) {
+
 			throw new IllegalArgumentException("Change Action ID must not be null or empty.");
 		}
 
 		String effectiveChangeActionId = changeActionId.trim();
 
-		/*
-		 * Prepare 3DEXPERIENCE authentication.
-		 */
-		service3DXConnexion.prepareAuthorizationHeaderValue();
-
-		/*
-		 * Kept because the existing POC may use this call to initialize or refresh
-		 * authentication/CSRF information.
-		 */
-		service3DXConnexion.getCsrfTokenValueBasic();
+		prepareConnection();
 
 		Map<String, String> headers = createSecurityHeaders();
 
-		/*
-		 * Build the Change Action URL.
-		 */
-		String url = space3dsUrlStr + CHANGE_ACTION_ENDPOINT + effectiveChangeActionId + "?$fields=realizedChanges";
+		ChangeActionInfo changeAction = loadChangeAction(effectiveChangeActionId, headers);
 
-		/*
-		 * Call 3DEXPERIENCE.
-		 */
-		HttpResponse<String> response = httpRequestService.loadUrl("GET", "", "", url, headers);
-
-		/*
-		 * Check HTTP response.
-		 */
-		if (response.statusCode() != 200) {
-
-			throw new RuntimeException("3DEXPERIENCE Change Action retrieval failed. " + "Status="
-					+ response.statusCode() + " Response=" + response.body());
-		}
-
-		/*
-		 * Parse the Change Action.
-		 */
-		ChangeActionInfo changeActionInfo = extractChangeAction(response.body());
-
-		/*
-		 * Build Copilot response.
-		 */
 		List<ChangeActionInfo> result = new ArrayList<>();
-		result.add(changeActionInfo);
 
-		return new ChangeActionDto(true, response.statusCode(), effectiveChangeActionId, result);
+		result.add(changeAction);
+
+		return new ChangeActionDto(true, 200, effectiveChangeActionId, result);
 	}
 
 	/**
-	 * Extract Change Action information from the 3DEXPERIENCE JSON response.
+	 * Load one Change Action from 3DEXPERIENCE.
+	 *
+	 * This method is shared by:
+	 *
+	 * - getChangeAction() - searchChangeActions()
+	 */
+	private ChangeActionInfo loadChangeAction(String changeActionId, Map<String, String> headers) throws Exception {
+
+		String encodedChangeActionId = URLEncoder.encode(changeActionId, StandardCharsets.UTF_8);
+
+		String url = normalizeBaseUrl(space3dsUrlStr) + CHANGE_ACTION_ENDPOINT + encodedChangeActionId
+				+ "?$fields=realizedChanges";
+
+		System.out.println("Loading Change Action: " + changeActionId);
+
+		HttpResponse<String> response = httpRequestService.loadUrl("GET", "", "", url, headers);
+
+		if (response.statusCode() != 200) {
+
+			throw new RuntimeException("Change Action retrieval failed. ID=" + changeActionId + " Status="
+					+ response.statusCode() + " Response=" + response.body());
+		}
+
+		return extractChangeAction(response.body());
+	}
+
+	/**
+	 * Extract physical IDs returned by:
+	 *
+	 * /dslc/changeaction/search
+	 *
+	 * Expected response:
+	 *
+	 * { "changeAction": [ { "identifier": "...", "relativePath": "...", "source":
+	 * "...", "type": "Change Action" } ] }
+	 */
+	private List<String> extractChangeActionIds(String responseBody) throws Exception {
+
+		JSONParser parser = new JSONParser();
+
+		JSONObject searchJson = (JSONObject) parser.parse(responseBody);
+
+		JSONArray changeActionArray = getJsonArray(searchJson, "changeAction");
+
+		List<String> result = new ArrayList<>();
+
+		if (changeActionArray == null || changeActionArray.isEmpty()) {
+
+			return result;
+		}
+
+		for (Object object : changeActionArray) {
+
+			if (!(object instanceof JSONObject)) {
+				continue;
+			}
+
+			JSONObject changeActionJson = (JSONObject) object;
+
+			String identifier = getString(changeActionJson, "identifier");
+
+			if (!identifier.isBlank()) {
+
+				result.add(identifier);
+			}
+		}
+
+		return result;
+	}
+
+	/**
+	 * Extract detailed Change Action information.
 	 */
 	private ChangeActionInfo extractChangeAction(String responseBody) throws Exception {
 
@@ -113,7 +234,7 @@ public class ChangeActionService {
 		ChangeActionInfo info = new ChangeActionInfo();
 
 		/*
-		 * Change Action standard attributes.
+		 * Standard Change Action information.
 		 */
 		info.setId(getString(json, "id"));
 
@@ -140,32 +261,24 @@ public class ChangeActionService {
 		/*
 		 * Realized Changes.
 		 */
-		List<RealizedChangeInfo> realizedChanges = extractRealizedChanges(json);
-
-		info.setRealizedChanges(realizedChanges);
+		info.setRealizedChanges(extractRealizedChanges(json));
 
 		return info;
 	}
 
 	/**
-	 * Extract the realizedChanges array returned by 3DEXPERIENCE.
+	 * Extract realizedChanges.
 	 */
 	private List<RealizedChangeInfo> extractRealizedChanges(JSONObject json) {
 
 		List<RealizedChangeInfo> result = new ArrayList<>();
 
-		JSONArray realizedChanges = (JSONArray) json.get("realizedChanges");
+		JSONArray realizedChanges = getJsonArray(json, "realizedChanges");
 
-		/*
-		 * No realized change.
-		 */
 		if (realizedChanges == null) {
 			return result;
 		}
 
-		/*
-		 * Process each realized change.
-		 */
 		for (Object object : realizedChanges) {
 
 			if (!(object instanceof JSONObject)) {
@@ -174,45 +287,26 @@ public class ChangeActionService {
 
 			JSONObject realizedChangeJson = (JSONObject) object;
 
-			/*
-			 * The "where" object contains the impacted object information.
-			 */
-			JSONObject whereJson = (JSONObject) realizedChangeJson.get("where");
+			JSONObject whereJson = getJsonObject(realizedChangeJson, "where");
 
-			if (whereJson == null) {
+			if (whereJson.isEmpty()) {
 				continue;
 			}
 
 			RealizedChangeInfo realizedChange = new RealizedChangeInfo();
 
-			/*
-			 * Object identifier.
-			 */
 			realizedChange.setIdentifier(getString(whereJson, "identifier"));
 
-			/*
-			 * Relative 3DEXPERIENCE REST path.
-			 */
 			realizedChange.setRelativePath(getString(whereJson, "relativePath"));
 
-			/*
-			 * Object source.
-			 */
 			realizedChange.setSource(getString(whereJson, "source"));
 
-			/*
-			 * Relation / realized change type.
-			 *
-			 * Examples: - CreateAssembly - Provide - ProcessContinuousProvide
-			 */
 			realizedChange.setType(getString(whereJson, "type"));
 
 			/*
 			 * Operations.
-			 *
-			 * Examples: - Create - Add
 			 */
-			JSONArray operationsJson = (JSONArray) realizedChangeJson.get("operations");
+			JSONArray operationsJson = getJsonArray(realizedChangeJson, "operations");
 
 			List<String> operations = new ArrayList<>();
 
@@ -221,6 +315,7 @@ public class ChangeActionService {
 				for (Object operation : operationsJson) {
 
 					if (operation != null) {
+
 						operations.add(operation.toString());
 					}
 				}
@@ -228,9 +323,6 @@ public class ChangeActionService {
 
 			realizedChange.setOperations(operations);
 
-			/*
-			 * Add the realized change to the result.
-			 */
 			result.add(realizedChange);
 		}
 
@@ -238,7 +330,17 @@ public class ChangeActionService {
 	}
 
 	/**
-	 * Build required 3DEXPERIENCE security headers.
+	 * Prepare 3DEXPERIENCE authentication.
+	 */
+	private void prepareConnection() throws Exception {
+
+		service3DXConnexion.prepareAuthorizationHeaderValue();
+
+		service3DXConnexion.getCsrfTokenValueBasic();
+	}
+
+	/**
+	 * Build required 3DEXPERIENCE headers.
 	 */
 	private Map<String, String> createSecurityHeaders() {
 
@@ -251,13 +353,61 @@ public class ChangeActionService {
 		return headers;
 	}
 
-	/**
-	 * Safely retrieve a string value from a JSONObject.
-	 */
+	private JSONObject getJsonObject(JSONObject json, String key) {
+
+		if (json == null) {
+			return new JSONObject();
+		}
+
+		Object value = json.get(key);
+
+		if (value instanceof JSONObject) {
+			return (JSONObject) value;
+		}
+
+		return new JSONObject();
+	}
+
+	private JSONArray getJsonArray(JSONObject json, String key) {
+
+		if (json == null) {
+			return null;
+		}
+
+		Object value = json.get(key);
+
+		if (value instanceof JSONArray) {
+			return (JSONArray) value;
+		}
+
+		return null;
+	}
+
 	private String getString(JSONObject json, String key) {
+
+		if (json == null) {
+			return "";
+		}
 
 		Object value = json.get(key);
 
 		return value == null ? "" : value.toString();
+	}
+
+	private String normalizeBaseUrl(String baseUrl) {
+
+		if (baseUrl == null || baseUrl.isBlank()) {
+
+			throw new IllegalStateException("The property threedx.space-url is not configured.");
+		}
+
+		String normalizedUrl = baseUrl.trim();
+
+		while (normalizedUrl.endsWith("/")) {
+
+			normalizedUrl = normalizedUrl.substring(0, normalizedUrl.length() - 1);
+		}
+
+		return normalizedUrl;
 	}
 }

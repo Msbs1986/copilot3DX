@@ -10,70 +10,91 @@ import com.keonys.copilot3DX.service.ChangeActionService;
 @Component
 public class ChangeActionMcpTools {
 
-    private final ChangeActionService changeActionService;
+	private final ChangeActionService changeActionService;
 
-    public ChangeActionMcpTools(ChangeActionService changeActionService) {
-        this.changeActionService = changeActionService;
-    }
+	public ChangeActionMcpTools(ChangeActionService changeActionService) {
 
-    @Tool(
-        name = "getChangeActionRealizedChanges",
-        description = """
-                Get a Change Action from 3DEXPERIENCE using its ID
-                and retrieve the objects contained in its realizedChanges.
+		this.changeActionService = changeActionService;
+	}
 
-                Use this tool when the user wants information about
-                a specific Change Action and the objects impacted,
-                created, added, provided or modified by this Change Action.
+	@Tool(name = "searchChangeActions", description = """
+			Search Change Actions in 3DEXPERIENCE.
 
-                The tool returns:
-                - Change Action information
-                - Change Action status
-                - Change Action title and description
-                - Change Action owner
-                - Change Action severity
-                - Collaborative Space
-                - Realized Changes
-                - Object identifiers
-                - Object relative paths
-                - Realized Change types
-                - Operations such as Create or Add
+			Use this tool when the user wants to search,
+			find or list Change Actions.
 
-                Examples of relevant requests:
-                - Show Change Action BA1C5B6D16E92A006A8EF53600009315
-                - Show the realized changes of Change Action BA1C5B6D16E92A006A8EF53600009315
-                - Which objects are impacted by Change Action BA1C5B6D16E92A006A8EF53600009315?
-                - Which Manufacturing Items were created by this Change Action?
-                - What objects were added by this Change Action?
-                - Show me the objects affected by this Change Action.
+			The search uses the 3DEXPERIENCE searchStr parameter.
 
-                The Change Action ID must be provided.
+			Examples:
+			- Give me all Change Actions
+			- List all Change Actions
+			- Search Change Actions
+			- Search Change Actions containing MBOM
+			- Find Change Action CA-0001
+			- Find the Change Action named Update MBOM
 
-                Do not use this tool to search Change Actions by name
-                or partial text.
+			If the user asks for all Change Actions,
+			use "*" as searchStr.
 
-                Do not use this tool to search Manufacturing Items
-                independently of a Change Action.
-                """
-    )
-    public ChangeActionDto getChangeActionRealizedChanges(
+			The search returns Change Action physical identifiers.
+			These identifiers can then be used with
+			getChangeActionRealizedChanges to retrieve detailed
+			information about a specific Change Action.
 
-            @ToolParam(
-                description = """
-                        Technical 3DEXPERIENCE identifier of the Change Action.
+			Use this tool if the Change Action physical ID
+			is not already known.
+			""")
+	public ChangeActionDto searchChangeActions(
 
-                        Example:
-                        BA1C5B6D16E92A006A8EF53600009315
+			@ToolParam(description = """
+					Search string sent to the 3DEXPERIENCE
+					Change Action searchStr parameter.
 
-                        This must be the physical ID of the Change Action,
-                        not its title or name.
-                        """,
-                required = true
-            )
-            String changeActionId
+					Examples:
+					- *
+					- MBOM
+					- CA-0001
+					- Update MBOM
 
-    ) throws Exception {
+					Use "*" to retrieve all Change Actions.
+					""", required = false) String searchStr) throws Exception {
 
-        return changeActionService.getChangeAction(changeActionId);
-    }
+		return changeActionService.searchChangeActions(searchStr);
+	}
+
+	@Tool(name = "getChangeActionRealizedChanges", description = """
+			Get detailed information about a specific Change Action
+			using its 3DEXPERIENCE physical ID.
+
+			The tool also retrieves the objects contained in
+			realizedChanges.
+
+			Use this tool when the Change Action physical ID
+			is already known.
+
+			Examples:
+			- Show Change Action BA1C5B6D16E92A006A8EF53600009315
+			- Show the realized changes of Change Action
+			  BA1C5B6D16E92A006A8EF53600009315
+			- Which objects were created by Change Action
+			  BA1C5B6D16E92A006A8EF53600009315?
+			- Which objects were added by this Change Action?
+
+			If the physical ID is not known,
+			use searchChangeActions first.
+			""")
+	public ChangeActionDto getChangeActionRealizedChanges(
+
+			@ToolParam(description = """
+					Physical identifier of the Change Action.
+
+					Example:
+					BA1C5B6D16E92A006A8EF53600009315
+
+					This identifier can be obtained from
+					searchChangeActions.
+					""", required = true) String changeActionId) throws Exception {
+
+		return changeActionService.getChangeAction(changeActionId);
+	}
 }

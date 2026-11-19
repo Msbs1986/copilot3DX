@@ -24,602 +24,401 @@ import com.keonys.copilot3DX.model.DocumentInfo;
 @Service
 public class DocumentService {
 
-    private static final String DOCUMENT_SEARCH_ENDPOINT =
-            "/resources/v1/modeler/documents/search";
+	private static final String DOCUMENT_SEARCH_ENDPOINT = "/resources/v1/modeler/documents/search";
 
-    private static final String DOCUMENT_ENDPOINT =
-            "/resources/v1/modeler/documents/";
-
-    @Value("${threedx.space-url}")
-    private String space3dsUrlStr;
+	private static final String DOCUMENT_ENDPOINT = "/resources/v1/modeler/documents/";
 
-    @Value("${threedx.security-context}")
-    private String secContext;
+	@Value("${threedx.space-url}")
+	private String space3dsUrlStr;
 
-    private final Service3DXConnexion service3DXConnexion;
-    private final HttpRequestService httpRequestService;
-
-    public DocumentService(
-            Service3DXConnexion service3DXConnexion,
-            HttpRequestService httpRequestService) {
-
-        this.service3DXConnexion = service3DXConnexion;
-        this.httpRequestService = httpRequestService;
-    }
-
-    public DocumentDto searchDocuments(
-            String searchStr) throws Exception {
-
-        prepareConnection();
-
-        Map<String, String> headers =
-                createSecurityHeaders();
-
-        String effectiveSearchStr =
-                searchStr == null || searchStr.isBlank()
-                        ? "*"
-                        : searchStr.trim();
-
-        String encodedSearchStr =
-                URLEncoder.encode(
-                        effectiveSearchStr,
-                        StandardCharsets.UTF_8);
-
-        String searchUrl =
-                normalizeBaseUrl(space3dsUrlStr)
-                        + DOCUMENT_SEARCH_ENDPOINT
-                        + "?searchStr="
-                        + encodedSearchStr;
-
-        System.out.println(
-                "Document search URL: "
-                        + searchUrl);
-
-        HttpResponse<String> searchResponse =
-                httpRequestService.loadUrl(
-                        "GET",
-                        "",
-                        "",
-                        searchUrl,
-                        headers);
-
-        if (searchResponse.statusCode() != 200) {
-
-            throw new RuntimeException(
-                    "3DEXPERIENCE Document search failed. Status="
-                            + searchResponse.statusCode()
-                            + " Response="
-                            + searchResponse.body());
-        }
-
-        List<DocumentInfo> documents =
-                extractDocuments(
-                        searchResponse.body());
-
-        return new DocumentDto(
-                true,
-                searchResponse.statusCode(),
-                effectiveSearchStr,
-                documents);
-    }
-
-    public DocumentDetailDto getDocumentByPhysicalId(
-            String physicalId) throws Exception {
-
-        if (physicalId == null || physicalId.isBlank()) {
-
-            throw new IllegalArgumentException(
-                    "The document physicalId is required.");
-        }
-
-        prepareConnection();
-
-        Map<String, String> headers =
-                createSecurityHeaders();
+	@Value("${threedx.security-context}")
+	private String secContext;
 
-        String effectivePhysicalId =
-                physicalId.trim();
+	private final Service3DXConnexion service3DXConnexion;
+	private final HttpRequestService httpRequestService;
 
-        String encodedPhysicalId =
-                URLEncoder.encode(
-                        effectivePhysicalId,
-                        StandardCharsets.UTF_8);
+	public DocumentService(Service3DXConnexion service3DXConnexion, HttpRequestService httpRequestService) {
 
-        String documentUrl =
-                normalizeBaseUrl(space3dsUrlStr)
-                        + DOCUMENT_ENDPOINT
-                        + encodedPhysicalId;
+		this.service3DXConnexion = service3DXConnexion;
+		this.httpRequestService = httpRequestService;
+	}
 
-        System.out.println(
-                "Document detail URL: "
-                        + documentUrl);
+	public DocumentDto searchDocuments(String searchStr) throws Exception {
 
-        HttpResponse<String> documentResponse =
-                httpRequestService.loadUrl(
-                        "GET",
-                        "",
-                        "",
-                        documentUrl,
-                        headers);
+		prepareConnection();
 
-        if (documentResponse.statusCode() != 200) {
+		Map<String, String> headers = createSecurityHeaders();
 
-            throw new RuntimeException(
-                    "3DEXPERIENCE Document details failed. Status="
-                            + documentResponse.statusCode()
-                            + " PhysicalId="
-                            + effectivePhysicalId
-                            + " Response="
-                            + documentResponse.body());
-        }
+		String effectiveSearchStr = searchStr == null || searchStr.isBlank() ? "*" : searchStr.trim();
 
-        JSONParser parser =
-                new JSONParser();
+		String encodedSearchStr = URLEncoder.encode(effectiveSearchStr, StandardCharsets.UTF_8);
 
-        JSONObject responseJson =
-                (JSONObject) parser.parse(
-                        documentResponse.body());
+		String searchUrl = normalizeBaseUrl(space3dsUrlStr) + DOCUMENT_SEARCH_ENDPOINT + "?$searchStr="
+				+ encodedSearchStr;
 
-        JSONObject documentJson =
-                extractFirstDocumentObject(
-                        responseJson);
+		System.out.println("Document search URL: " + searchUrl);
 
-        if (documentJson == null) {
+		HttpResponse<String> searchResponse = httpRequestService.loadUrl("GET", "", "", searchUrl, headers);
 
-            throw new RuntimeException(
-                    "No document found for physicalId "
-                            + effectivePhysicalId);
-        }
+		if (searchResponse.statusCode() != 200) {
 
-        DocumentInfo document =
-                mapDocument(documentJson);
+			throw new RuntimeException("3DEXPERIENCE Document search failed. Status=" + searchResponse.statusCode()
+					+ " Response=" + searchResponse.body());
+		}
 
-        return new DocumentDetailDto(
-                true,
-                documentResponse.statusCode(),
-                effectivePhysicalId,
-                document);
-    }
+		List<DocumentInfo> documents = extractDocuments(searchResponse.body());
 
-    private void prepareConnection()
-            throws Exception {
+		return new DocumentDto(true, searchResponse.statusCode(), effectiveSearchStr, documents);
+	}
 
-        service3DXConnexion
-                .prepareAuthorizationHeaderValue();
+	public DocumentDetailDto getDocumentByPhysicalId(String physicalId) throws Exception {
 
-        service3DXConnexion
-                .getCsrfTokenValueBasic();
-    }
+		if (physicalId == null || physicalId.isBlank()) {
 
-    private List<DocumentInfo> extractDocuments(
-            String responseBody) throws Exception {
+			throw new IllegalArgumentException("The document physicalId is required.");
+		}
 
-        JSONParser parser =
-                new JSONParser();
+		prepareConnection();
 
-        JSONObject searchJson =
-                (JSONObject) parser.parse(
-                        responseBody);
+		Map<String, String> headers = createSecurityHeaders();
 
-        JSONArray documentArray =
-                getJsonArray(
-                        searchJson,
-                        "data");
+		String effectivePhysicalId = physicalId.trim();
 
-        List<DocumentInfo> result =
-                new ArrayList<>();
+		String encodedPhysicalId = URLEncoder.encode(effectivePhysicalId, StandardCharsets.UTF_8);
 
-        if (documentArray == null
-                || documentArray.isEmpty()) {
+		String documentUrl = normalizeBaseUrl(space3dsUrlStr) + DOCUMENT_ENDPOINT + encodedPhysicalId;
 
-            return result;
-        }
+		System.out.println("Document detail URL: " + documentUrl);
 
-        for (Object object : documentArray) {
+		HttpResponse<String> documentResponse = httpRequestService.loadUrl("GET", "", "", documentUrl, headers);
 
-            if (!(object instanceof JSONObject)) {
-                continue;
-            }
+		if (documentResponse.statusCode() != 200) {
 
-            JSONObject documentJson =
-                    (JSONObject) object;
+			throw new RuntimeException("3DEXPERIENCE Document details failed. Status=" + documentResponse.statusCode()
+					+ " PhysicalId=" + effectivePhysicalId + " Response=" + documentResponse.body());
+		}
 
-            DocumentInfo document =
-                    mapDocument(documentJson);
+		JSONParser parser = new JSONParser();
 
-            if (document != null) {
-                result.add(document);
-            }
-        }
+		JSONObject responseJson = (JSONObject) parser.parse(documentResponse.body());
 
-        return result;
-    }
+		JSONObject documentJson = extractFirstDocumentObject(responseJson);
 
-    private JSONObject extractFirstDocumentObject(
-            JSONObject responseJson) {
+		if (documentJson == null) {
 
-        JSONArray data =
-                getJsonArray(
-                        responseJson,
-                        "data");
+			throw new RuntimeException("No document found for physicalId " + effectivePhysicalId);
+		}
 
-        if (data == null || data.isEmpty()) {
-            return null;
-        }
+		DocumentInfo document = mapDocument(documentJson);
 
-        Object firstObject =
-                data.get(0);
+		return new DocumentDetailDto(true, documentResponse.statusCode(), effectivePhysicalId, document);
+	}
 
-        if (firstObject instanceof JSONObject) {
-            return (JSONObject) firstObject;
-        }
+	private void prepareConnection() throws Exception {
 
-        return null;
-    }
+		service3DXConnexion.prepareAuthorizationHeaderValue();
 
-    private DocumentInfo mapDocument(
-            JSONObject documentJson) {
+		service3DXConnexion.getCsrfTokenValueBasic();
+	}
 
-        if (documentJson == null) {
-            return null;
-        }
+	private List<DocumentInfo> extractDocuments(String responseBody) throws Exception {
 
-        JSONObject dataElements =
-                getJsonObject(
-                        documentJson,
-                        "dataelements");
+		JSONParser parser = new JSONParser();
 
-        JSONObject relatedData =
-                getJsonObject(
-                        documentJson,
-                        "relateddata");
+		JSONObject searchJson = (JSONObject) parser.parse(responseBody);
 
-        JSONObject ownerDataElements =
-                getFirstRelatedDataElements(
-                        relatedData,
-                        "ownerInfo");
+		JSONArray documentArray = getJsonArray(searchJson, "data");
 
-        JSONObject originatorDataElements =
-                getFirstRelatedDataElements(
-                        relatedData,
-                        "originatorInfo");
+		List<DocumentInfo> result = new ArrayList<>();
 
-        DocumentInfo info =
-                new DocumentInfo();
+		if (documentArray == null || documentArray.isEmpty()) {
 
-        info.setId(
-                getString(documentJson, "id"));
+			return result;
+		}
 
-        info.setType(
-                getString(documentJson, "type"));
+		for (Object object : documentArray) {
 
-        info.setIdentifier(
-                getString(documentJson, "identifier"));
+			if (!(object instanceof JSONObject)) {
+				continue;
+			}
 
-        info.setRelativePath(
-                getString(documentJson, "relativePath"));
+			JSONObject documentJson = (JSONObject) object;
 
-        info.setName(
-                getString(dataElements, "name"));
+			DocumentInfo document = mapDocument(documentJson);
 
-        info.setTitle(
-                getString(dataElements, "title"));
+			if (document != null) {
+				result.add(document);
+			}
+		}
 
-        info.setRevision(
-                getString(dataElements, "revision"));
+		return result;
+	}
 
-        info.setState(
-                getString(dataElements, "state"));
+	private JSONObject extractFirstDocumentObject(JSONObject responseJson) {
 
-        info.setStateNLS(
-                getString(dataElements, "stateNLS"));
+		JSONArray data = getJsonArray(responseJson, "data");
 
-        info.setPolicy(
-                getString(dataElements, "policy"));
+		if (data == null || data.isEmpty()) {
+			return null;
+		}
 
-        info.setDescription(
-                getString(dataElements, "description"));
+		Object firstObject = data.get(0);
 
-        info.setCollabSpace(
-                getString(dataElements, "collabspace"));
+		if (firstObject instanceof JSONObject) {
+			return (JSONObject) firstObject;
+		}
 
-        info.setCollabSpaceTitle(
-                getString(dataElements, "collabSpaceTitle"));
+		return null;
+	}
 
-        info.setFileExtension(
-                getString(dataElements, "fileExtension"));
+	private DocumentInfo mapDocument(JSONObject documentJson) {
 
-        info.setOriginated(
-                getString(dataElements, "originated"));
+		if (documentJson == null) {
+			return null;
+		}
 
-        info.setModified(
-                getString(dataElements, "modified"));
+		JSONObject dataElements = getJsonObject(documentJson, "dataelements");
 
-        info.setIsLatestRevision(
-                getString(dataElements, "isLatestRevision"));
+		JSONObject relatedData = getJsonObject(documentJson, "relateddata");
 
-        info.setHasDownloadAccess(
-                getString(dataElements, "hasDownloadAccess"));
+		JSONObject ownerDataElements = getFirstRelatedDataElements(relatedData, "ownerInfo");
 
-        info.setHasReviseAccess(
-                getString(dataElements, "hasReviseAccess"));
+		JSONObject originatorDataElements = getFirstRelatedDataElements(relatedData, "originatorInfo");
 
-        info.setHasModifyAccess(
-                getString(dataElements, "hasModifyAccess"));
+		DocumentInfo info = new DocumentInfo();
 
-        info.setHasDeleteAccess(
-                getString(dataElements, "hasDeleteAccess"));
+		info.setId(getString(documentJson, "id"));
 
-        info.setReservedBy(
-                getString(dataElements, "reservedby"));
+		info.setType(getString(documentJson, "type"));
 
-        info.setCodification(
-                getString(dataElements, "CODIFICATION"));
+		info.setIdentifier(getString(documentJson, "identifier"));
 
-        info.setOwner(
-                getString(ownerDataElements, "name"));
+		info.setRelativePath(getString(documentJson, "relativePath"));
 
-        info.setOwnerFirstName(
-                getString(ownerDataElements, "firstname"));
+		info.setName(getString(dataElements, "name"));
 
-        info.setOwnerLastName(
-                getString(ownerDataElements, "lastname"));
+		info.setTitle(getString(dataElements, "title"));
 
-        info.setOriginator(
-                getString(originatorDataElements, "name"));
+		info.setRevision(getString(dataElements, "revision"));
 
-        info.setOriginatorFirstName(
-                getString(originatorDataElements, "firstname"));
+		info.setState(getString(dataElements, "state"));
 
-        info.setOriginatorLastName(
-                getString(originatorDataElements, "lastname"));
+		info.setStateNLS(getString(dataElements, "stateNLS"));
 
-        info.setFiles(
-                extractDocumentFiles(
-                        relatedData));
+		info.setPolicy(getString(dataElements, "policy"));
 
-        return info;
-    }
+		info.setDescription(getString(dataElements, "description"));
 
-    private List<DocumentFileInfo> extractDocumentFiles(
-            JSONObject relatedData) {
+		info.setCollabSpace(getString(dataElements, "collabspace"));
 
-        List<DocumentFileInfo> result =
-                new ArrayList<>();
+		info.setCollabSpaceTitle(getString(dataElements, "collabSpaceTitle"));
 
-        if (relatedData == null) {
-            return result;
-        }
+		info.setFileExtension(getString(dataElements, "fileExtension"));
 
-        JSONArray files =
-                getJsonArray(
-                        relatedData,
-                        "files");
+		info.setOriginated(getString(dataElements, "originated"));
 
-        if (files == null || files.isEmpty()) {
-            return result;
-        }
+		info.setModified(getString(dataElements, "modified"));
 
-        for (Object object : files) {
+		info.setIsLatestRevision(getString(dataElements, "isLatestRevision"));
 
-            if (!(object instanceof JSONObject)) {
-                continue;
-            }
+		info.setHasDownloadAccess(getString(dataElements, "hasDownloadAccess"));
 
-            JSONObject fileJson =
-                    (JSONObject) object;
+		info.setHasReviseAccess(getString(dataElements, "hasReviseAccess"));
 
-            JSONObject fileDataElements =
-                    getJsonObject(
-                            fileJson,
-                            "dataelements");
+		info.setHasModifyAccess(getString(dataElements, "hasModifyAccess"));
 
-            JSONObject fileRelatedData =
-                    getJsonObject(
-                            fileJson,
-                            "relateddata");
+		info.setHasDeleteAccess(getString(dataElements, "hasDeleteAccess"));
 
-            JSONObject ownerDataElements =
-                    getFirstRelatedDataElements(
-                            fileRelatedData,
-                            "ownerInfo");
+		info.setReservedBy(getString(dataElements, "reservedby"));
 
-            DocumentFileInfo fileInfo =
-                    new DocumentFileInfo();
+		info.setCodification(getString(dataElements, "CODIFICATION"));
 
-            fileInfo.setId(
-                    getString(fileJson, "id"));
+		info.setOwner(getString(ownerDataElements, "name"));
 
-            fileInfo.setType(
-                    getString(fileJson, "type"));
+		info.setOwnerFirstName(getString(ownerDataElements, "firstname"));
 
-            fileInfo.setIdentifier(
-                    getString(fileJson, "identifier"));
+		info.setOwnerLastName(getString(ownerDataElements, "lastname"));
 
-            fileInfo.setRelativePath(
-                    getString(fileJson, "relativePath"));
+		info.setOriginator(getString(originatorDataElements, "name"));
 
-            fileInfo.setRelationshipId(
-                    getString(fileJson, "relId"));
+		info.setOriginatorFirstName(getString(originatorDataElements, "firstname"));
 
-            fileInfo.setTitle(
-                    getString(fileDataElements, "title"));
+		info.setOriginatorLastName(getString(originatorDataElements, "lastname"));
 
-            fileInfo.setName(
-                    getString(fileDataElements, "name"));
+		info.setFiles(extractDocumentFiles(relatedData));
 
-            fileInfo.setRevision(
-                    getString(fileDataElements, "revision"));
+		return info;
+	}
 
-            fileInfo.setComments(
-                    getString(fileDataElements, "comments"));
+	private List<DocumentFileInfo> extractDocumentFiles(JSONObject relatedData) {
 
-            fileInfo.setFileCategory(
-                    getString(fileDataElements, "fileCategory"));
+		List<DocumentFileInfo> result = new ArrayList<>();
 
-            fileInfo.setLocker(
-                    getString(fileDataElements, "locker"));
+		if (relatedData == null) {
+			return result;
+		}
 
-            fileInfo.setFileType(
-                    getString(fileDataElements, "fileType"));
+		JSONArray files = getJsonArray(relatedData, "files");
 
-            fileInfo.setDimension(
-                    getString(fileDataElements, "dimension"));
+		if (files == null || files.isEmpty()) {
+			return result;
+		}
 
-            fileInfo.setLength(
-                    getString(fileDataElements, "length"));
+		for (Object object : files) {
 
-            fileInfo.setFileSize(
-                    getString(fileDataElements, "fileSize"));
+			if (!(object instanceof JSONObject)) {
+				continue;
+			}
 
-            fileInfo.setFileChecksum(
-                    getString(fileDataElements, "fileChecksum"));
+			JSONObject fileJson = (JSONObject) object;
 
-            fileInfo.setFormat(
-                    getString(fileDataElements, "format"));
+			JSONObject fileDataElements = getJsonObject(fileJson, "dataelements");
 
-            fileInfo.setOriginated(
-                    getString(fileDataElements, "originated"));
+			JSONObject fileRelatedData = getJsonObject(fileJson, "relateddata");
 
-            fileInfo.setModified(
-                    getString(fileDataElements, "modified"));
+			JSONObject ownerDataElements = getFirstRelatedDataElements(fileRelatedData, "ownerInfo");
 
-            fileInfo.setOwner(
-                    getString(ownerDataElements, "name"));
+			DocumentFileInfo fileInfo = new DocumentFileInfo();
 
-            fileInfo.setOwnerFirstName(
-                    getString(ownerDataElements, "firstname"));
+			fileInfo.setId(getString(fileJson, "id"));
 
-            fileInfo.setOwnerLastName(
-                    getString(ownerDataElements, "lastname"));
+			fileInfo.setType(getString(fileJson, "type"));
 
-            result.add(fileInfo);
-        }
+			fileInfo.setIdentifier(getString(fileJson, "identifier"));
 
-        return result;
-    }
+			fileInfo.setRelativePath(getString(fileJson, "relativePath"));
 
-    private JSONObject getFirstRelatedDataElements(
-            JSONObject relatedData,
-            String relationName) {
+			fileInfo.setRelationshipId(getString(fileJson, "relId"));
 
-        if (relatedData == null) {
-            return new JSONObject();
-        }
+			fileInfo.setTitle(getString(fileDataElements, "title"));
 
-        JSONArray relatedObjects =
-                getJsonArray(
-                        relatedData,
-                        relationName);
+			fileInfo.setName(getString(fileDataElements, "name"));
 
-        if (relatedObjects == null
-                || relatedObjects.isEmpty()) {
+			fileInfo.setRevision(getString(fileDataElements, "revision"));
 
-            return new JSONObject();
-        }
+			fileInfo.setComments(getString(fileDataElements, "comments"));
 
-        Object firstObject =
-                relatedObjects.get(0);
+			fileInfo.setFileCategory(getString(fileDataElements, "fileCategory"));
 
-        if (!(firstObject instanceof JSONObject)) {
-            return new JSONObject();
-        }
+			fileInfo.setLocker(getString(fileDataElements, "locker"));
 
-        JSONObject relatedObject =
-                (JSONObject) firstObject;
+			fileInfo.setFileType(getString(fileDataElements, "fileType"));
 
-        return getJsonObject(
-                relatedObject,
-                "dataelements");
-    }
+			fileInfo.setDimension(getString(fileDataElements, "dimension"));
 
-    private Map<String, String> createSecurityHeaders() {
+			fileInfo.setLength(getString(fileDataElements, "length"));
 
-        Map<String, String> headers =
-                new HashMap<>();
+			fileInfo.setFileSize(getString(fileDataElements, "fileSize"));
 
-        headers.put(
-                "SecurityContext",
-                secContext);
+			fileInfo.setFileChecksum(getString(fileDataElements, "fileChecksum"));
 
-        headers.put(
-                "Accept",
-                MediaType.APPLICATION_JSON_VALUE);
+			fileInfo.setFormat(getString(fileDataElements, "format"));
 
-        return headers;
-    }
+			fileInfo.setOriginated(getString(fileDataElements, "originated"));
 
-    private JSONObject getJsonObject(
-            JSONObject json,
-            String key) {
+			fileInfo.setModified(getString(fileDataElements, "modified"));
 
-        if (json == null) {
-            return new JSONObject();
-        }
+			fileInfo.setOwner(getString(ownerDataElements, "name"));
 
-        Object value =
-                json.get(key);
+			fileInfo.setOwnerFirstName(getString(ownerDataElements, "firstname"));
 
-        if (value instanceof JSONObject) {
-            return (JSONObject) value;
-        }
+			fileInfo.setOwnerLastName(getString(ownerDataElements, "lastname"));
 
-        return new JSONObject();
-    }
+			result.add(fileInfo);
+		}
 
-    private JSONArray getJsonArray(
-            JSONObject json,
-            String key) {
+		return result;
+	}
 
-        if (json == null) {
-            return null;
-        }
+	private JSONObject getFirstRelatedDataElements(JSONObject relatedData, String relationName) {
 
-        Object value =
-                json.get(key);
+		if (relatedData == null) {
+			return new JSONObject();
+		}
 
-        if (value instanceof JSONArray) {
-            return (JSONArray) value;
-        }
+		JSONArray relatedObjects = getJsonArray(relatedData, relationName);
 
-        return null;
-    }
+		if (relatedObjects == null || relatedObjects.isEmpty()) {
 
-    private String getString(
-            JSONObject json,
-            String key) {
+			return new JSONObject();
+		}
 
-        if (json == null) {
-            return "";
-        }
+		Object firstObject = relatedObjects.get(0);
 
-        Object value =
-                json.get(key);
+		if (!(firstObject instanceof JSONObject)) {
+			return new JSONObject();
+		}
 
-        return value == null
-                ? ""
-                : value.toString();
-    }
+		JSONObject relatedObject = (JSONObject) firstObject;
 
-    private String normalizeBaseUrl(
-            String baseUrl) {
+		return getJsonObject(relatedObject, "dataelements");
+	}
 
-        if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalStateException(
-                    "The property threedx.space-url is not configured.");
-        }
+	private Map<String, String> createSecurityHeaders() {
 
-        String normalizedUrl =
-                baseUrl.trim();
+		Map<String, String> headers = new HashMap<>();
 
-        while (normalizedUrl.endsWith("/")) {
+		headers.put("SecurityContext", secContext);
 
-            normalizedUrl =
-                    normalizedUrl.substring(
-                            0,
-                            normalizedUrl.length() - 1);
-        }
+		headers.put("Accept", MediaType.APPLICATION_JSON_VALUE);
 
-        return normalizedUrl;
-    }
+		return headers;
+	}
+
+	private JSONObject getJsonObject(JSONObject json, String key) {
+
+		if (json == null) {
+			return new JSONObject();
+		}
+
+		Object value = json.get(key);
+
+		if (value instanceof JSONObject) {
+			return (JSONObject) value;
+		}
+
+		return new JSONObject();
+	}
+
+	private JSONArray getJsonArray(JSONObject json, String key) {
+
+		if (json == null) {
+			return null;
+		}
+
+		Object value = json.get(key);
+
+		if (value instanceof JSONArray) {
+			return (JSONArray) value;
+		}
+
+		return null;
+	}
+
+	private String getString(JSONObject json, String key) {
+
+		if (json == null) {
+			return "";
+		}
+
+		Object value = json.get(key);
+
+		return value == null ? "" : value.toString();
+	}
+
+	private String normalizeBaseUrl(String baseUrl) {
+
+		if (baseUrl == null || baseUrl.isBlank()) {
+			throw new IllegalStateException("The property threedx.space-url is not configured.");
+		}
+
+		String normalizedUrl = baseUrl.trim();
+
+		while (normalizedUrl.endsWith("/")) {
+
+			normalizedUrl = normalizedUrl.substring(0, normalizedUrl.length() - 1);
+		}
+
+		return normalizedUrl;
+	}
 }

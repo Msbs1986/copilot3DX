@@ -67,7 +67,7 @@ public class ChangeActionService {
 		/*
 		 * Build search URL.
 		 */
-		String searchUrl = normalizeBaseUrl(space3dsUrlStr) + CHANGE_ACTION_SEARCH_ENDPOINT + "?searchStr="
+		String searchUrl = normalizeBaseUrl(space3dsUrlStr) + CHANGE_ACTION_SEARCH_ENDPOINT + "?$searchStr="
 				+ encodedSearchStr;
 
 		System.out.println("Change Action search URL: " + searchUrl);

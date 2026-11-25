@@ -27,6 +27,8 @@ public class WorkPlanService {
 
 	private static final String WORKPLAN_TYPE = "DELLmiWorkPlanSystemReference";
 
+	private static final String HEADER_OPERATION_TYPE = "DELLmiHeaderOperationReference";
+
 	private static final String WORKPLAN_SEARCH_ENDPOINT = "/resources/v1/modeler/dsprcs/dsprcs:MfgProcess/search";
 
 	private static final String WORKPLAN_ENDPOINT = "/resources/v1/modeler/dsprcs/dsprcs:MfgProcess/";
@@ -136,6 +138,52 @@ public class WorkPlanService {
 	}
 
 	/**
+	 * Expand one WorkPlan and return only its Header Operation references.
+	 *
+	 * The expand response may contain: - the WorkPlan reference; - Header Operation
+	 * references; - Header Operation instances; - other Manufacturing Process
+	 * objects.
+	 *
+	 * Only DELLmiHeaderOperationReference objects are returned.
+	 */
+	public List<WorkPlanInfo> getWorkPlanHeaderOperations(String workPlanPhysicalId) throws Exception {
+
+		validatePhysicalId(workPlanPhysicalId, "WorkPlan");
+
+		String effectivePhysicalId = workPlanPhysicalId.trim();
+
+		prepareConnection();
+
+		Map<String, String> headers = createSecurityHeaders();
+
+		String encodedPhysicalId = URLEncoder.encode(effectivePhysicalId, StandardCharsets.UTF_8);
+
+		String url = normalizeBaseUrl(space3dsUrlStr) + WORKPLAN_ENDPOINT + encodedPhysicalId + "/expand";
+
+		JSONObject requestBody = buildWorkPlanExpandRequestBody();
+
+		System.out.println("WorkPlan expand URL: " + url);
+
+		System.out.println("WorkPlan expand body: " + requestBody.toJSONString());
+
+		HttpResponse<String> response = httpRequestService.loadUrl("POST", MediaType.APPLICATION_JSON_VALUE,
+				requestBody.toJSONString(), url, headers);
+
+		if (response.statusCode() != 200) {
+
+			throw new RuntimeException("3DEXPERIENCE WorkPlan expand failed. " + "WorkPlanId=" + effectivePhysicalId
+					+ " Status=" + response.statusCode() + " Response=" + response.body());
+		}
+
+		List<WorkPlanInfo> headerOperations = extractHeaderOperations(response.body());
+
+		System.out.println(
+				"Header Operations found for WorkPlan " + effectivePhysicalId + ": " + headerOperations.size());
+
+		return headerOperations;
+	}
+
+	/**
 	 * Get all WorkPlans attached to a Manufacturing Item.
 	 *
 	 * Step 1: call ItemSpecification/Locate. Step 2: extract WorkPlan processRef
@@ -231,6 +279,21 @@ public class WorkPlanService {
 	}
 
 	/**
+	 * Build the WorkPlan expand request body.
+	 */
+	@SuppressWarnings("unchecked")
+	private JSONObject buildWorkPlanExpandRequestBody() {
+
+		JSONObject requestBody = new JSONObject();
+
+		requestBody.put("expandDepth", -1);
+
+		requestBody.put("withPath", false);
+
+		return requestBody;
+	}
+
+	/**
 	 * Extract WorkPlans returned by MfgProcess/search.
 	 */
 	private List<WorkPlanInfo> extractWorkPlansFromSearch(String responseBody) throws Exception {
@@ -268,6 +331,45 @@ public class WorkPlanService {
 	}
 
 	/**
+	 * Extract Header Operation references from a WorkPlan expand response.
+	 *
+	 * Header Operation instances are ignored.
+	 */
+	private List<WorkPlanInfo> extractHeaderOperations(String responseBody) throws Exception {
+
+		JSONParser parser = new JSONParser();
+
+		JSONObject rootJson = (JSONObject) parser.parse(responseBody);
+
+		JSONArray members = getJsonArray(rootJson, "member");
+
+		List<WorkPlanInfo> headerOperations = new ArrayList<>();
+
+		if (members == null || members.isEmpty()) {
+			return headerOperations;
+		}
+
+		for (Object memberObject : members) {
+
+			if (!(memberObject instanceof JSONObject)) {
+				continue;
+			}
+
+			JSONObject memberJson = (JSONObject) memberObject;
+
+			String type = getString(memberJson, "type");
+
+			if (!HEADER_OPERATION_TYPE.equals(type)) {
+				continue;
+			}
+
+			headerOperations.add(mapWorkPlanInfo(memberJson));
+		}
+
+		return headerOperations;
+	}
+
+	/**
 	 * Extract WorkPlan references returned by ItemSpecification/Locate.
 	 */
 	private List<WorkPlanReference> extractWorkPlanReferences(String responseBody) throws Exception {
@@ -283,7 +385,6 @@ public class WorkPlanService {
 		Set<String> processedIdentifiers = new HashSet<>();
 
 		if (rootMembers == null || rootMembers.isEmpty()) {
-
 			return references;
 		}
 
@@ -339,7 +440,6 @@ public class WorkPlanService {
 				}
 
 				if (!processedIdentifiers.add(identifier)) {
-
 					continue;
 				}
 
@@ -389,7 +489,6 @@ public class WorkPlanService {
 		JSONArray members = getJsonArray(rootJson, "member");
 
 		if (members == null || members.isEmpty()) {
-
 			return null;
 		}
 
@@ -414,9 +513,10 @@ public class WorkPlanService {
 	}
 
 	/**
-	 * Map a WorkPlan JSON object to WorkPlanInfo.
+	 * Map a Manufacturing Process JSON object to WorkPlanInfo.
 	 *
-	 * This method supports: - search results; - detailed WorkPlan responses.
+	 * This method supports: - WorkPlan search results; - detailed WorkPlan
+	 * responses; - Header Operation references returned by WorkPlan expand.
 	 */
 	private WorkPlanInfo mapWorkPlanInfo(JSONObject workPlanJson) {
 
@@ -557,6 +657,7 @@ public class WorkPlanService {
 		}
 
 		if (value instanceof Number) {
+
 			return ((Number) value).intValue();
 		}
 
@@ -583,6 +684,7 @@ public class WorkPlanService {
 		}
 
 		if (value instanceof Number) {
+
 			return ((Number) value).doubleValue();
 		}
 

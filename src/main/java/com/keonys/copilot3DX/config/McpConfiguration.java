@@ -9,6 +9,7 @@ import com.keonys.copilot3DX.mcp.ChangeActionMcpTools;
 import com.keonys.copilot3DX.mcp.DocumentTools;
 import com.keonys.copilot3DX.mcp.EngineeringItemExpandMcpTools;
 import com.keonys.copilot3DX.mcp.EngineeringItemMcpTools;
+import com.keonys.copilot3DX.mcp.HeaderOperationMcpTools;
 import com.keonys.copilot3DX.mcp.ManufacturingItemExpandMcpTools;
 import com.keonys.copilot3DX.mcp.ManufacturingItemMcpTools;
 import com.keonys.copilot3DX.mcp.MaturityMcpTools;
@@ -23,12 +24,12 @@ public class McpConfiguration {
 			ManufacturingItemExpandMcpTools manufacturingItemExpandMcpTools,
 			EngineeringItemMcpTools engineeringItemMcpTools, DocumentTools documentTools,
 			EngineeringItemExpandMcpTools engineeringItemExpandMcpTools, MaturityMcpTools maturityMcpTools,
-			WorkPlanMcpTools workPlanMcpTools) {
+			WorkPlanMcpTools workPlanMcpTools, HeaderOperationMcpTools headerOperationMcpTools) {
 
 		return MethodToolCallbackProvider.builder()
 				.toolObjects(changeActionMcpTools, manufacturingItemMcpTools, manufacturingItemExpandMcpTools,
 						engineeringItemMcpTools, documentTools, engineeringItemExpandMcpTools, maturityMcpTools,
-						workPlanMcpTools)
+						workPlanMcpTools, headerOperationMcpTools)
 				.build();
 	}
 }

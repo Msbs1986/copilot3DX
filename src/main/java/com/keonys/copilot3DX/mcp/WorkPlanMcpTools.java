@@ -1,5 +1,7 @@
 package com.keonys.copilot3DX.mcp;
 
+import java.util.List;
+
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -111,5 +113,42 @@ public class WorkPlanMcpTools {
 		System.out.println("MCP TOOL CALLED -> getManufacturingItemWorkPlans : " + manufacturingItemPhysicalId);
 
 		return workPlanService.getAttachedWorkPlans(manufacturingItemPhysicalId);
+	}
+
+	@Tool(name = "getWorkPlanHeaderOperations", description = """
+			Get the Header Operations (HOP) contained
+			in a WorkPlan or Gamme in 3DEXPERIENCE.
+
+			Use this tool when the user asks to:
+			- display the Header Operations of a WorkPlan
+			- display the HOPs of a WorkPlan
+			- display the operations of a Gamme
+			- list Header Operations of a Gamme
+			- retrieve Header Operations from a WorkPlan
+
+			The input must be the physical ID of the WorkPlan
+			or Gamme.
+
+			The tool expands the WorkPlan and returns only
+			objects of type DELLmiHeaderOperationReference.
+
+			Header Operation instances are not returned.
+
+			If only the WorkPlan name or title is known,
+			first call searchWorkPlans to obtain its physical ID.
+			""")
+	public List<WorkPlanInfo> getWorkPlanHeaderOperations(
+
+			@ToolParam(description = """
+					Physical ID of the WorkPlan or Gamme
+					for which Header Operations (HOP)
+					must be retrieved.
+					""", required = true) String workPlanPhysicalId
+
+	) throws Exception {
+
+		System.out.println("MCP TOOL CALLED -> getWorkPlanHeaderOperations : " + workPlanPhysicalId);
+
+		return workPlanService.getWorkPlanHeaderOperations(workPlanPhysicalId);
 	}
 }

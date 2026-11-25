@@ -27,11 +27,13 @@ public class WorkPlanService {
 
 	private static final String WORKPLAN_TYPE = "DELLmiWorkPlanSystemReference";
 
+	private static final String WORKPLAN_SEARCH_ENDPOINT = "/resources/v1/modeler/dsprcs/dsprcs:MfgProcess/search";
+
+	private static final String WORKPLAN_ENDPOINT = "/resources/v1/modeler/dsprcs/dsprcs:MfgProcess/";
+
 	private static final String ITEM_SPECIFICATION_LOCATE_ENDPOINT = "/resources/v1/modeler/dsprcs/dsprcs:ItemSpecification/Locate";
 
 	private static final String MANUFACTURING_ITEM_ENDPOINT = "/resources/v1/modeler/dsmfg/dsmfg:MfgItem/";
-
-	private static final String WORKPLAN_ENDPOINT = "/resources/v1/modeler/dsprcs/dsprcs:MfgProcess/";
 
 	private static final String WORKPLAN_DETAILS_MASK = "dsprcs:MfgProcessMask.Details";
 
@@ -51,84 +53,67 @@ public class WorkPlanService {
 	}
 
 	/**
-	 * Retrieve all WorkPlans attached to a Manufacturing Item.
+	 * Search WorkPlans in 3DEXPERIENCE.
 	 *
-	 * STEP 1: POST /resources/v1/modeler/dsprcs/dsprcs:ItemSpecification/Locate
+	 * If searchStr is null, empty or equal to "*", "Workplan*" is sent to
+	 * 3DEXPERIENCE.
 	 *
-	 * STEP 2: Extract processRef objects with type: DELLmiWorkPlanSystemReference
-	 *
-	 * STEP 3: Retrieve WorkPlan details using:
-	 *
-	 * {relativePath}?$mask=dsprcs:MfgProcessMask.Details
+	 * This prevents MfgProcess/search from returning the first 50 objects of every
+	 * MfgProcess type.
 	 */
-	public WorkPlanDto getAttachedWorkPlans(String manufacturingItemPhysicalId) throws Exception {
-
-		if (manufacturingItemPhysicalId == null || manufacturingItemPhysicalId.isBlank()) {
-
-			throw new IllegalArgumentException("Manufacturing Item physical ID must not be null or empty.");
-		}
-
-		String effectivePhysicalId = manufacturingItemPhysicalId.trim();
+	public WorkPlanDto searchWorkPlans(String searchStr) throws Exception {
 
 		prepareConnection();
 
 		Map<String, String> headers = createSecurityHeaders();
 
 		/*
-		 * STEP 1
-		 *
-		 * Locate WorkPlans attached to the Manufacturing Item.
+		 * Criterion displayed in the response.
 		 */
-		HttpResponse<String> locateResponse = locateWorkPlans(effectivePhysicalId, headers);
+		String requestedSearchStr = searchStr == null || searchStr.isBlank() ? "*" : searchStr.trim();
 
 		/*
-		 * STEP 2
+		 * Criterion really sent to 3DEXPERIENCE.
 		 *
-		 * Extract WorkPlan references.
-		 */
-		List<WorkPlanReference> references = extractWorkPlanReferences(locateResponse.body());
-
-		System.out.println("WorkPlans found for Manufacturing Item " + effectivePhysicalId + ": " + references.size());
-
-		/*
-		 * STEP 3
+		 * MfgProcess/search?$searchStr=* returns all types of MfgProcess and is limited
+		 * to the first 50 results.
 		 *
-		 * Retrieve detailed information for every WorkPlan found.
+		 * Workplan* limits the search to objects whose name or title corresponds to a
+		 * WorkPlan.
 		 */
-		List<WorkPlanInfo> workPlans = new ArrayList<>();
+		String effective3DXSearchStr = "*".equals(requestedSearchStr) ? "Workplan*" : requestedSearchStr;
 
-		for (WorkPlanReference reference : references) {
+		String encodedSearchStr = URLEncoder.encode(effective3DXSearchStr, StandardCharsets.UTF_8);
 
-			try {
+		String url = normalizeBaseUrl(space3dsUrlStr) + WORKPLAN_SEARCH_ENDPOINT + "?$searchStr=" + encodedSearchStr;
 
-				WorkPlanInfo workPlan = loadWorkPlanByRelativePath(reference.getRelativePath(), headers);
+		System.out.println("Requested WorkPlan search criterion: " + requestedSearchStr);
 
-				if (workPlan != null) {
-					workPlans.add(workPlan);
-				}
+		System.out.println("Effective 3DX WorkPlan search criterion: " + effective3DXSearchStr);
 
-			} catch (Exception e) {
+		System.out.println("WorkPlan search URL: " + url);
 
-				/*
-				 * One inaccessible WorkPlan should not prevent the other WorkPlans from being
-				 * returned.
-				 */
-				System.err.println("Unable to retrieve WorkPlan " + reference.getIdentifier() + ": " + e.getMessage());
-			}
+		HttpResponse<String> response = httpRequestService.loadUrl("GET", "", "", url, headers);
+
+		if (response.statusCode() != 200) {
+
+			throw new RuntimeException("3DEXPERIENCE WorkPlan search failed. " + "SearchCriterion="
+					+ effective3DXSearchStr + " Status=" + response.statusCode() + " Response=" + response.body());
 		}
 
-		return new WorkPlanDto(effectivePhysicalId, workPlans);
+		List<WorkPlanInfo> workPlans = extractWorkPlansFromSearch(response.body());
+
+		System.out.println("WorkPlans found after type filtering: " + workPlans.size());
+
+		return new WorkPlanDto(true, response.statusCode(), requestedSearchStr, workPlans);
 	}
 
 	/**
-	 * Get one WorkPlan directly using its physical ID.
+	 * Get detailed information for one WorkPlan using its physical ID.
 	 */
 	public WorkPlanInfo getWorkPlanInfo(String workPlanPhysicalId) throws Exception {
 
-		if (workPlanPhysicalId == null || workPlanPhysicalId.isBlank()) {
-
-			throw new IllegalArgumentException("WorkPlan physical ID must not be null or empty.");
-		}
+		validatePhysicalId(workPlanPhysicalId, "WorkPlan");
 
 		String effectivePhysicalId = workPlanPhysicalId.trim();
 
@@ -151,11 +136,50 @@ public class WorkPlanService {
 	}
 
 	/**
-	 * STEP 1
+	 * Get all WorkPlans attached to a Manufacturing Item.
 	 *
-	 * Call:
-	 *
-	 * POST /resources/v1/modeler/dsprcs/ dsprcs:ItemSpecification/Locate
+	 * Step 1: call ItemSpecification/Locate. Step 2: extract WorkPlan processRef
+	 * objects. Step 3: load details for every WorkPlan.
+	 */
+	public WorkPlanDto getAttachedWorkPlans(String manufacturingItemPhysicalId) throws Exception {
+
+		validatePhysicalId(manufacturingItemPhysicalId, "Manufacturing Item");
+
+		String effectivePhysicalId = manufacturingItemPhysicalId.trim();
+
+		prepareConnection();
+
+		Map<String, String> headers = createSecurityHeaders();
+
+		HttpResponse<String> locateResponse = locateWorkPlans(effectivePhysicalId, headers);
+
+		List<WorkPlanReference> references = extractWorkPlanReferences(locateResponse.body());
+
+		System.out.println("WorkPlans found for Manufacturing Item " + effectivePhysicalId + ": " + references.size());
+
+		List<WorkPlanInfo> workPlans = new ArrayList<>();
+
+		for (WorkPlanReference reference : references) {
+
+			try {
+
+				WorkPlanInfo workPlan = loadWorkPlanByRelativePath(reference.getRelativePath(), headers);
+
+				if (workPlan != null) {
+					workPlans.add(workPlan);
+				}
+
+			} catch (Exception e) {
+
+				System.err.println("Unable to retrieve WorkPlan " + reference.getIdentifier() + ": " + e.getMessage());
+			}
+		}
+
+		return new WorkPlanDto(true, locateResponse.statusCode(), effectivePhysicalId, workPlans);
+	}
+
+	/**
+	 * Call ItemSpecification/Locate.
 	 */
 	private HttpResponse<String> locateWorkPlans(String manufacturingItemPhysicalId, Map<String, String> headers)
 			throws Exception {
@@ -168,11 +192,6 @@ public class WorkPlanService {
 
 		System.out.println("WorkPlan Locate body: " + requestBody.toJSONString());
 
-		/*
-		 * Same pattern as the other 3DX services:
-		 *
-		 * loadUrl( method, contentType, body, url, headers)
-		 */
 		HttpResponse<String> response = httpRequestService.loadUrl("POST", MediaType.APPLICATION_JSON_VALUE,
 				requestBody.toJSONString(), url, headers);
 
@@ -187,10 +206,7 @@ public class WorkPlanService {
 	}
 
 	/**
-	 * Build body for ItemSpecification/Locate.
-	 *
-	 * { "referencedObjects": [ { "identifier": "...", "source": ".../enovia",
-	 * "relativePath": "/resources/v1/modeler/dsmfg/dsmfg:MfgItem/..." } ] }
+	 * Build the ItemSpecification/Locate body.
 	 */
 	@SuppressWarnings("unchecked")
 	private JSONObject buildLocateRequestBody(String manufacturingItemPhysicalId) {
@@ -215,11 +231,44 @@ public class WorkPlanService {
 	}
 
 	/**
-	 * Extract WorkPlan references returned by Locate.
-	 *
-	 * Path:
-	 *
-	 * member[] -> dsprcs:ItemSpecification -> member[] -> processRef
+	 * Extract WorkPlans returned by MfgProcess/search.
+	 */
+	private List<WorkPlanInfo> extractWorkPlansFromSearch(String responseBody) throws Exception {
+
+		JSONParser parser = new JSONParser();
+
+		JSONObject rootJson = (JSONObject) parser.parse(responseBody);
+
+		JSONArray members = getJsonArray(rootJson, "member");
+
+		List<WorkPlanInfo> workPlans = new ArrayList<>();
+
+		if (members == null || members.isEmpty()) {
+			return workPlans;
+		}
+
+		for (Object memberObject : members) {
+
+			if (!(memberObject instanceof JSONObject)) {
+				continue;
+			}
+
+			JSONObject workPlanJson = (JSONObject) memberObject;
+
+			String type = getString(workPlanJson, "type");
+
+			if (!WORKPLAN_TYPE.equals(type)) {
+				continue;
+			}
+
+			workPlans.add(mapWorkPlanInfo(workPlanJson));
+		}
+
+		return workPlans;
+	}
+
+	/**
+	 * Extract WorkPlan references returned by ItemSpecification/Locate.
 	 */
 	private List<WorkPlanReference> extractWorkPlanReferences(String responseBody) throws Exception {
 
@@ -229,16 +278,13 @@ public class WorkPlanService {
 
 		JSONArray rootMembers = getJsonArray(rootJson, "member");
 
-		List<WorkPlanReference> result = new ArrayList<>();
+		List<WorkPlanReference> references = new ArrayList<>();
 
-		/*
-		 * Used to avoid duplicated WorkPlans.
-		 */
 		Set<String> processedIdentifiers = new HashSet<>();
 
 		if (rootMembers == null || rootMembers.isEmpty()) {
 
-			return result;
+			return references;
 		}
 
 		for (Object rootMemberObject : rootMembers) {
@@ -279,9 +325,6 @@ public class WorkPlanService {
 
 				String type = getString(processRefJson, "type");
 
-				/*
-				 * Only keep WorkPlan objects.
-				 */
 				if (!WORKPLAN_TYPE.equals(type)) {
 					continue;
 				}
@@ -295,41 +338,26 @@ public class WorkPlanService {
 					continue;
 				}
 
-				/*
-				 * Ignore duplicated WorkPlans.
-				 */
 				if (!processedIdentifiers.add(identifier)) {
 
 					continue;
 				}
 
-				WorkPlanReference reference = new WorkPlanReference();
-
-				reference.setIdentifier(identifier);
-
-				reference.setRelativePath(relativePath);
-
-				reference.setType(type);
-
-				result.add(reference);
+				references.add(new WorkPlanReference(identifier, relativePath, type));
 			}
 		}
 
-		return result;
+		return references;
 	}
 
 	/**
-	 * Load detailed information for one WorkPlan using its relativePath.
-	 *
-	 * GET
-	 *
-	 * {relativePath}?$mask=dsprcs:MfgProcessMask.Details
+	 * Load details for one WorkPlan using its relativePath.
 	 */
 	private WorkPlanInfo loadWorkPlanByRelativePath(String relativePath, Map<String, String> headers) throws Exception {
 
 		if (relativePath == null || relativePath.isBlank()) {
 
-			throw new IllegalArgumentException("WorkPlan relativePath must not be null or empty.");
+			throw new IllegalArgumentException("WorkPlan relativePath must not " + "be null or empty.");
 		}
 
 		String normalizedRelativePath = normalizeRelativePath(relativePath);
@@ -350,11 +378,7 @@ public class WorkPlanService {
 	}
 
 	/**
-	 * Parse detailed WorkPlan response.
-	 *
-	 * Expected:
-	 *
-	 * { "totalItems": 1, "member": [ { ... } ] }
+	 * Extract one detailed WorkPlan.
 	 */
 	private WorkPlanInfo extractWorkPlan(String responseBody) throws Exception {
 
@@ -379,15 +403,22 @@ public class WorkPlanService {
 
 		String type = getString(workPlanJson, "type");
 
-		/*
-		 * Make sure that the returned object is actually a WorkPlan.
-		 */
 		if (!WORKPLAN_TYPE.equals(type)) {
 
-			System.err.println("Object ignored because type is not " + WORKPLAN_TYPE + ". Returned type=" + type);
+			System.err.println("Object ignored because its type is not " + WORKPLAN_TYPE + ". Returned type=" + type);
 
 			return null;
 		}
+
+		return mapWorkPlanInfo(workPlanJson);
+	}
+
+	/**
+	 * Map a WorkPlan JSON object to WorkPlanInfo.
+	 *
+	 * This method supports: - search results; - detailed WorkPlan responses.
+	 */
+	private WorkPlanInfo mapWorkPlanInfo(JSONObject workPlanJson) {
 
 		WorkPlanInfo info = new WorkPlanInfo();
 
@@ -399,7 +430,7 @@ public class WorkPlanService {
 
 		info.setId(getString(workPlanJson, "id"));
 
-		info.setType(type);
+		info.setType(getString(workPlanJson, "type"));
 
 		info.setModified(getString(workPlanJson, "modified"));
 
@@ -459,9 +490,7 @@ public class WorkPlanService {
 	}
 
 	/**
-	 * Build 3DEXPERIENCE headers.
-	 *
-	 * The SecurityContext is required by the WorkPlan APIs.
+	 * Build required 3DEXPERIENCE headers.
 	 */
 	private Map<String, String> createSecurityHeaders() {
 
@@ -474,9 +503,6 @@ public class WorkPlanService {
 		return headers;
 	}
 
-	/**
-	 * Safely get a JSONObject.
-	 */
 	private JSONObject getJsonObject(JSONObject json, String key) {
 
 		if (json == null) {
@@ -492,9 +518,6 @@ public class WorkPlanService {
 		return new JSONObject();
 	}
 
-	/**
-	 * Safely get a JSONArray.
-	 */
 	private JSONArray getJsonArray(JSONObject json, String key) {
 
 		if (json == null) {
@@ -510,9 +533,6 @@ public class WorkPlanService {
 		return null;
 	}
 
-	/**
-	 * Safely get a String.
-	 */
 	private String getString(JSONObject json, String key) {
 
 		if (json == null) {
@@ -524,9 +544,6 @@ public class WorkPlanService {
 		return value == null ? "" : value.toString();
 	}
 
-	/**
-	 * Safely get an Integer.
-	 */
 	private Integer getInteger(JSONObject json, String key) {
 
 		if (json == null) {
@@ -540,7 +557,6 @@ public class WorkPlanService {
 		}
 
 		if (value instanceof Number) {
-
 			return ((Number) value).intValue();
 		}
 
@@ -554,9 +570,6 @@ public class WorkPlanService {
 		}
 	}
 
-	/**
-	 * Safely get a Double.
-	 */
 	private Double getDouble(JSONObject json, String key) {
 
 		if (json == null) {
@@ -570,7 +583,6 @@ public class WorkPlanService {
 		}
 
 		if (value instanceof Number) {
-
 			return ((Number) value).doubleValue();
 		}
 
@@ -584,9 +596,14 @@ public class WorkPlanService {
 		}
 	}
 
-	/**
-	 * Normalize relativePath.
-	 */
+	private void validatePhysicalId(String physicalId, String objectType) {
+
+		if (physicalId == null || physicalId.isBlank()) {
+
+			throw new IllegalArgumentException(objectType + " physical ID must not " + "be null or empty.");
+		}
+	}
+
 	private String normalizeRelativePath(String relativePath) {
 
 		String normalizedPath = relativePath.trim();
@@ -604,9 +621,6 @@ public class WorkPlanService {
 		return normalizedPath;
 	}
 
-	/**
-	 * Normalize 3DSpace base URL.
-	 */
 	private String normalizeBaseUrl(String baseUrl) {
 
 		if (baseUrl == null || baseUrl.isBlank()) {

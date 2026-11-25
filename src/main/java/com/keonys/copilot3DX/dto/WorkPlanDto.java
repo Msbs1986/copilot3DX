@@ -7,7 +7,9 @@ import com.keonys.copilot3DX.model.WorkPlanInfo;
 
 public class WorkPlanDto {
 
-	private String manufacturingItemPhysicalId;
+	private boolean success;
+	private int statusCode;
+	private String searchCriteria;
 	private int totalItems;
 	private List<WorkPlanInfo> workPlans;
 
@@ -15,22 +17,39 @@ public class WorkPlanDto {
 		this.workPlans = new ArrayList<>();
 	}
 
-	public WorkPlanDto(String manufacturingItemPhysicalId, List<WorkPlanInfo> workPlans) {
+	public WorkPlanDto(boolean success, int statusCode, String searchCriteria, List<WorkPlanInfo> workPlans) {
 
-		this.manufacturingItemPhysicalId = manufacturingItemPhysicalId;
+		this.success = success;
+		this.statusCode = statusCode;
+		this.searchCriteria = searchCriteria;
 
 		this.workPlans = workPlans != null ? workPlans : new ArrayList<>();
 
 		this.totalItems = this.workPlans.size();
 	}
 
-	public String getManufacturingItemPhysicalId() {
-		return manufacturingItemPhysicalId;
+	public boolean isSuccess() {
+		return success;
 	}
 
-	public void setManufacturingItemPhysicalId(String manufacturingItemPhysicalId) {
+	public void setSuccess(boolean success) {
+		this.success = success;
+	}
 
-		this.manufacturingItemPhysicalId = manufacturingItemPhysicalId;
+	public int getStatusCode() {
+		return statusCode;
+	}
+
+	public void setStatusCode(int statusCode) {
+		this.statusCode = statusCode;
+	}
+
+	public String getSearchCriteria() {
+		return searchCriteria;
+	}
+
+	public void setSearchCriteria(String searchCriteria) {
+		this.searchCriteria = searchCriteria;
 	}
 
 	public int getTotalItems() {

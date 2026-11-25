@@ -12,19 +12,23 @@ import com.keonys.copilot3DX.mcp.EngineeringItemMcpTools;
 import com.keonys.copilot3DX.mcp.ManufacturingItemExpandMcpTools;
 import com.keonys.copilot3DX.mcp.ManufacturingItemMcpTools;
 import com.keonys.copilot3DX.mcp.MaturityMcpTools;
+import com.keonys.copilot3DX.mcp.WorkPlanMcpTools;
 
 @Configuration
 public class McpConfiguration {
 
 	@Bean
 	public ToolCallbackProvider toolCallbackProvider(ChangeActionMcpTools changeActionMcpTools,
-			ManufacturingItemMcpTools manufacturingItemMcpTools, ManufacturingItemExpandMcpTools expandMcpTools,
+			ManufacturingItemMcpTools manufacturingItemMcpTools,
+			ManufacturingItemExpandMcpTools manufacturingItemExpandMcpTools,
 			EngineeringItemMcpTools engineeringItemMcpTools, DocumentTools documentTools,
-			EngineeringItemExpandMcpTools engineeringItemExpandMcpTools, MaturityMcpTools maturityMcpTools) {
+			EngineeringItemExpandMcpTools engineeringItemExpandMcpTools, MaturityMcpTools maturityMcpTools,
+			WorkPlanMcpTools workPlanMcpTools) {
 
-		return MethodToolCallbackProvider
-				.builder().toolObjects(changeActionMcpTools, manufacturingItemMcpTools, expandMcpTools,
-						engineeringItemMcpTools, documentTools, engineeringItemExpandMcpTools, maturityMcpTools)
+		return MethodToolCallbackProvider.builder()
+				.toolObjects(changeActionMcpTools, manufacturingItemMcpTools, manufacturingItemExpandMcpTools,
+						engineeringItemMcpTools, documentTools, engineeringItemExpandMcpTools, maturityMcpTools,
+						workPlanMcpTools)
 				.build();
 	}
 }
